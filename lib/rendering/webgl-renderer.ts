@@ -176,7 +176,7 @@ export class WebGLRenderer {
     return true
   }
   
-  setUniform(programName: string, name: string, type: 'float' | 'vec2' | 'vec3' | 'vec4' | 'int' | 'sampler2D', value: any): void {
+  setUniform(programName: string, name: string, type: 'float' | 'vec2' | 'vec3' | 'vec4' | 'int' | 'sampler2D' | 'mat3', value: any): void {
     if (!this.gl) return
     
     const program = this.programs.get(programName)
@@ -203,6 +203,9 @@ export class WebGLRenderer {
         break
       case 'sampler2D':
         this.gl.uniform1i(location, value)
+        break
+      case 'mat3':
+        this.gl.uniformMatrix3fv(location, false, value)
         break
     }
   }
@@ -263,6 +266,36 @@ export class WebGLRenderer {
   
   isWebGLSupported(): boolean {
     return this.isSupported
+  }
+  
+  getAttribLocation(programName: string, name: string): number {
+    if (!this.gl) return -1
+    
+    const program = this.programs.get(programName)
+    if (!program) return -1
+    
+    return this.gl.getAttribLocation(program, name)
+  }
+  
+  setVertexAttribDivisor(location: number, divisor: number): void {
+    if (!this.gl) return
+    this.gl.vertexAttribDivisor(location, divisor)
+  }
+  
+  drawArraysInstanced(mode: number, first: number, count: number, instanceCount: number): void {
+    if (!this.gl) return
+    this.gl.drawArraysInstanced(mode, first, count, instanceCount)
+  }
+  
+  enableBlend(): void {
+    if (!this.gl) return
+    this.gl.enable(this.gl.BLEND)
+    this.gl.blendFunc(this.gl.SRC_ALPHA, this.gl.ONE_MINUS_SRC_ALPHA)
+  }
+  
+  disableBlend(): void {
+    if (!this.gl) return
+    this.gl.disable(this.gl.BLEND)
   }
   
   cleanup(): void {

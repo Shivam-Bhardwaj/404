@@ -2,6 +2,7 @@
 import { AnimationPhase } from '../types'
 import { COLORS } from '../constants'
 import { WebGLRenderer } from '../rendering/webgl-renderer'
+import { SharedWebGLContext } from '../rendering/shared-webgl-context'
 import { fullScreenQuadVertex, reactionDiffusionFragment, renderFragment } from '../shaders/reaction-diffusion'
 
 export class ChemicalPhase implements AnimationPhase {
@@ -34,14 +35,29 @@ export class ChemicalPhase implements AnimationPhase {
   private time = 0
   
   constructor(canvas: HTMLCanvasElement) {
-    // Try to initialize WebGL
+    // Try to initialize WebGL using shared context
     try {
-      this.webglRenderer = new WebGLRenderer(canvas)
-      if (this.webglRenderer.isWebGLSupported()) {
-        this.useWebGL = true
-        this.setupWebGL()
+      const sharedContext = SharedWebGLContext.getInstance()
+      
+      // Try to get existing renderer or create new one
+      if (sharedContext.isInitialized()) {
+        this.webglRenderer = sharedContext.getRenderer()
+        if (this.webglRenderer && this.webglRenderer.isWebGLSupported()) {
+          this.useWebGL = true
+          this.setupWebGL()
+        } else {
+          this.canvas2D = canvas.getContext('2d')
+        }
       } else {
-        this.canvas2D = canvas.getContext('2d')
+        // Create new renderer and register it
+        this.webglRenderer = new WebGLRenderer(canvas)
+        if (this.webglRenderer.isWebGLSupported()) {
+          sharedContext.initialize(canvas, this.webglRenderer)
+          this.useWebGL = true
+          this.setupWebGL()
+        } else {
+          this.canvas2D = canvas.getContext('2d')
+        }
       }
     } catch (e) {
       console.warn('WebGL initialization failed, using Canvas 2D fallback:', e)
@@ -240,8 +256,30 @@ export class ChemicalPhase implements AnimationPhase {
     this.isComplete = false
     this.time = 0
     
-    if (this.webglRenderer) {
-      // Cleanup handled by renderer
+    // Cleanup WebGL resources
+    if (this.webglRenderer && this.useWebGL) {
+      const gl = this.webglRenderer.getContext()
+      if (gl) {
+        // Delete textures
+        if (this.textureA) {
+          gl.deleteTexture(this.textureA)
+          this.textureA = null
+        }
+        if (this.textureB) {
+          gl.deleteTexture(this.textureB)
+          this.textureB = null
+        }
+        
+        // Delete framebuffers
+        if (this.framebufferA) {
+          gl.deleteFramebuffer(this.framebufferA)
+          this.framebufferA = null
+        }
+        if (this.framebufferB) {
+          gl.deleteFramebuffer(this.framebufferB)
+          this.framebufferB = null
+        }
+      }
     }
   }
 }

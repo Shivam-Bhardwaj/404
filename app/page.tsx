@@ -11,6 +11,7 @@ import { PhaseManager } from '@/lib/phases/phase-manager'
 import { HardwareDetector } from '@/lib/hardware/detection'
 import { PerformanceMonitor } from '@/lib/telemetry/monitor'
 import { AdaptiveQualityScaler } from '@/lib/performance/adaptive-quality'
+import { MemoryManager } from '@/lib/performance/memory-manager'
 import { PhaseType, DeviceTier, AnimationPhase } from '@/lib/types'
 
 export default function Error404() {
@@ -63,8 +64,16 @@ export default function Error404() {
     phases.set('chemical', new ChemicalPhase(canvas))
     phases.set('white', new WhitePhase())
     phases.set('circle', new CirclePhase(canvas.width, canvas.height))
-    phases.set('explosion', new ExplosionPhase(canvas.width, canvas.height))
+    phases.set('explosion', new ExplosionPhase(canvas.width, canvas.height, canvas))
     phases.set('ecosystem', new EcosystemPhase(canvas.width, canvas.height))
+    
+    // Initialize memory manager and register cleanup callbacks
+    const memoryManager = MemoryManager.getInstance()
+    phases.forEach((phase) => {
+      memoryManager.registerCleanupCallback(() => {
+        phase.cleanup()
+      })
+    })
     
     // Create phase sequence with looping
     const sequence: PhaseType[] = [

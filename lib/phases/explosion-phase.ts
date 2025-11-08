@@ -3,6 +3,9 @@ import { AnimationPhase } from '../types'
 import { SPHSimulation } from '../physics/sph'
 import { COLORS } from '../constants'
 import { randomRange, curlNoise } from '../utils/math'
+import { WebGLRenderer } from '../rendering/webgl-renderer'
+import { GPUParticleRenderer } from '../rendering/particle-gpu-renderer'
+import { SharedWebGLContext } from '../rendering/shared-webgl-context'
 
 export class ExplosionPhase implements AnimationPhase {
   name: 'explosion' = 'explosion'
@@ -15,13 +18,50 @@ export class ExplosionPhase implements AnimationPhase {
   private centerY = 0
   private time = 0
   
-  constructor(width: number, height: number) {
+  // GPU rendering
+  private webglRenderer: WebGLRenderer | null = null
+  private gpuParticleRenderer: GPUParticleRenderer | null = null
+  private useGPU = false
+  
+  constructor(width: number, height: number, canvas?: HTMLCanvasElement) {
     this.sph = new SPHSimulation(width, height)
     this.centerX = width / 2
     this.centerY = height / 2
+    
+    // Try to initialize GPU rendering using shared context
+    if (canvas) {
+      try {
+        const sharedContext = SharedWebGLContext.getInstance()
+        
+        // Try to get existing renderer or create new one
+        if (sharedContext.isInitialized()) {
+          this.webglRenderer = sharedContext.getRenderer()
+          if (this.webglRenderer && this.webglRenderer.isWebGLSupported()) {
+            this.useGPU = true
+            this.gpuParticleRenderer = new GPUParticleRenderer(this.webglRenderer, 1000)
+          }
+        } else {
+          // Create new renderer and register it
+          this.webglRenderer = new WebGLRenderer(canvas)
+          if (this.webglRenderer.isWebGLSupported()) {
+            sharedContext.initialize(canvas, this.webglRenderer)
+            this.useGPU = true
+            this.gpuParticleRenderer = new GPUParticleRenderer(this.webglRenderer, 1000)
+          }
+        }
+      } catch (e) {
+        console.warn('GPU particle rendering not available:', e)
+      }
+    }
   }
   
   init(): void {
+    // Clear existing particles before creating new ones
+    this.sph.particles = []
+    this.progress = 0
+    this.isComplete = false
+    this.time = 0
+    
     // Create explosion particles in a circle
     const particleCount = 500
     for (let i = 0; i < particleCount; i++) {
@@ -60,6 +100,33 @@ export class ExplosionPhase implements AnimationPhase {
   }
   
   render(ctx: CanvasRenderingContext2D): void {
+    // Use GPU rendering if available
+    if (this.useGPU && this.gpuParticleRenderer && this.webglRenderer) {
+      this.renderGPU(ctx.canvas)
+      return
+    }
+    
+    // Fallback to Canvas 2D
+    this.renderCanvas2D(ctx)
+  }
+  
+  private renderGPU(canvas: HTMLCanvasElement): void {
+    if (!this.gpuParticleRenderer || !this.webglRenderer) return
+    
+    const gl = this.webglRenderer.getContext()
+    if (!gl) return
+    
+    // Clear background
+    this.webglRenderer.clear(0, 0, 0, 1)
+    
+    // Update particle data on GPU
+    this.gpuParticleRenderer.updateParticles(this.sph.particles)
+    
+    // Render particles
+    this.gpuParticleRenderer.render(canvas.width, canvas.height)
+  }
+  
+  private renderCanvas2D(ctx: CanvasRenderingContext2D): void {
     ctx.fillStyle = COLORS.black
     ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height)
     
@@ -89,9 +156,22 @@ export class ExplosionPhase implements AnimationPhase {
   }
   
   cleanup(): void {
+    // Clear all particles to prevent memory leaks
     this.sph.particles = []
+    // Clear spatial grid
+    if (this.sph['grid']) {
+      this.sph['grid'].clear()
+    }
+    
+    // Cleanup GPU resources
+    if (this.gpuParticleRenderer) {
+      this.gpuParticleRenderer.cleanup()
+      this.gpuParticleRenderer = null
+    }
+    
     this.progress = 0
     this.isComplete = false
+    this.time = 0
   }
 }
 

@@ -16,6 +16,11 @@ export class EcosystemPhase implements AnimationPhase {
   }
   
   init(): void {
+    // Clear existing organisms before spawning new ones
+    if (this.boids['organisms']) {
+      this.boids['organisms'] = []
+    }
+    
     // Spawn initial population
     const types: Array<'predator' | 'prey' | 'producer'> = ['predator', 'prey', 'producer']
     
@@ -52,27 +57,38 @@ export class EcosystemPhase implements AnimationPhase {
     // Update ecosystem
     this.boids.update(dt)
     
-    // Maintain minimum population
+    // Maintain minimum population but limit maximum
     const stats = this.boids.getPopulationStats()
+    const totalPopulation = stats.prey + stats.producers + stats.predators
     
-    if (stats.prey < 5) {
-      for (let i = 0; i < 3; i++) {
-        this.boids.addOrganism(
-          Math.random() * this.boids['width'],
-          Math.random() * this.boids['height'],
-          'prey'
-        )
+    // Limit total population to prevent memory issues
+    const maxPopulation = 200
+    
+    if (totalPopulation < maxPopulation) {
+      if (stats.prey < 5) {
+        for (let i = 0; i < 3; i++) {
+          this.boids.addOrganism(
+            Math.random() * this.boids['width'],
+            Math.random() * this.boids['height'],
+            'prey'
+          )
+        }
+      }
+      
+      if (stats.producers < 10) {
+        for (let i = 0; i < 5; i++) {
+          this.boids.addOrganism(
+            Math.random() * this.boids['width'],
+            Math.random() * this.boids['height'],
+            'producer'
+          )
+        }
       }
     }
     
-    if (stats.producers < 10) {
-      for (let i = 0; i < 5; i++) {
-        this.boids.addOrganism(
-          Math.random() * this.boids['width'],
-          Math.random() * this.boids['height'],
-          'producer'
-        )
-      }
+    // Remove dead organisms periodically to prevent accumulation
+    if (this.boids['organisms']) {
+      this.boids['organisms'] = this.boids['organisms'].filter(org => org.energy > 0 && org.age < org.maxAge)
     }
     
     if (this.progress >= 1) {
@@ -166,7 +182,18 @@ export class EcosystemPhase implements AnimationPhase {
   }
   
   cleanup(): void {
+    // Clear all organisms to prevent memory leaks
     this.boids.organisms = []
+    
+    // Clear trails if they exist
+    if (this.boids['organisms']) {
+      this.boids['organisms'].forEach((org: any) => {
+        if (org.trail) {
+          org.trail = []
+        }
+      })
+    }
+    
     this.progress = 0
     this.isComplete = false
   }

@@ -123,7 +123,14 @@ export class SimpleNeuralNetwork {
 }
 
 // Pre-trained network for common error message patterns
+let globalNetworkInstance: SimpleNeuralNetwork | null = null
+
 export function createPreTrainedNetwork(charSet: string): SimpleNeuralNetwork {
+  // Return singleton instance to prevent memory leaks
+  if (globalNetworkInstance) {
+    return globalNetworkInstance
+  }
+  
   const network = new SimpleNeuralNetwork(10 * charSet.length, 64, charSet.length)
   
   // Train on common patterns
@@ -156,6 +163,7 @@ export function createPreTrainedNetwork(charSet: string): SimpleNeuralNetwork {
     }
   }
   
+  globalNetworkInstance = network
   return network
 }
 
