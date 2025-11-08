@@ -11,6 +11,7 @@ interface SimulationResponse {
     simulation_type: string
     num_particles: number
     computation_time_ms: number
+    accelerator?: 'cpu' | 'cuda'
   }
   error?: string
 }

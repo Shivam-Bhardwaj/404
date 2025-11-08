@@ -313,12 +313,8 @@ export class EcosystemPhase implements AnimationPhase {
         throw new Error('Empty boids payload')
       }
       // Report accelerator if present
-      const accel = (run.metadata?.accelerator as 'cpu' | 'cuda' | undefined)
-      if (accel) {
-        this.reportSource('server')
-        const tracker = this.sourceTracker
-        tracker.update(this.name, 'server', accel)
-      }
+      const accel = run.metadata?.accelerator as 'cpu' | 'cuda' | undefined
+      this.reportSource('server', accel)
       
       if (prime || this.remoteState.length === 0) {
         this.remoteState = samples
@@ -392,8 +388,8 @@ export class EcosystemPhase implements AnimationPhase {
     return typeof performance !== 'undefined' ? performance.now() : Date.now()
   }
   
-  private reportSource(mode: 'server' | 'local'): void {
-    this.sourceTracker.update(this.name, mode)
+  private reportSource(mode: 'server' | 'local', accelerator?: 'cpu' | 'cuda'): void {
+    this.sourceTracker.update(this.name, mode, accelerator)
   }
   
   render(ctx: CanvasRenderingContext2D): void {

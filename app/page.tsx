@@ -247,9 +247,11 @@ export default function Error404() {
         .map((sample) => Math.round(sample.usedMB))
         .join(' → ')
     : ''
-  const currentSourceMode = simulationSources[currentPhase]?.mode ?? 'local'
+  const currentStatus = simulationSources[currentPhase]
   const currentSourceLabel =
-    currentSourceMode === 'server' ? 'SERVER (staging GPU)' : 'LOCAL (browser)'
+    currentStatus?.mode === 'server'
+      ? `SERVER${currentStatus.accelerator ? ` (${currentStatus.accelerator.toUpperCase()})` : ''}`
+      : 'LOCAL (browser)'
 
   return (
     <div className="relative w-screen h-screen overflow-hidden bg-black">

@@ -310,8 +310,8 @@ export class ExplosionPhase implements AnimationPhase {
     return typeof performance !== 'undefined' ? performance.now() : Date.now()
   }
   
-  private reportSource(mode: 'server' | 'local'): void {
-    this.sourceTracker.update(this.name, mode)
+  private reportSource(mode: 'server' | 'local', accelerator?: 'cpu' | 'cuda'): void {
+    this.sourceTracker.update(this.name, mode, accelerator)
   }
   
   render(ctx: CanvasRenderingContext2D): void {

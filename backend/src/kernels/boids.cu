@@ -8,6 +8,7 @@ extern "C" __global__ void boids_step(
     float alignWeight,
     float cohWeight,
     float maxSpeed,
+    const unsigned char* species,
     float* x,
     float* y,
     float* vx,
@@ -22,16 +23,23 @@ extern "C" __global__ void boids_step(
     float yi = y[i];
     float vxi = vx[i];
     float vyi = vy[i];
+    unsigned char si = species[i];
 
     float sepX = 0.0f, sepY = 0.0f; int sepC = 0;
     float aliX = 0.0f, aliY = 0.0f; int aliC = 0;
     float cohX = 0.0f, cohY = 0.0f; int cohC = 0;
+    float chaseX = 0.0f, chaseY = 0.0f; int chaseC = 0;
+    float fleeX = 0.0f, fleeY = 0.0f; int fleeC = 0;
+
+    const float predatorRadius = cohRadius * 1.5f;
+    const float preyFearRadius = sepRadius * 2.0f;
 
     for (int j = 0; j < n; ++j) {
         if (j == i) continue;
         float dx = x[j] - xi;
         float dy = y[j] - yi;
         float d2 = dx*dx + dy*dy;
+        unsigned char sj = species[j];
 
         if (d2 < sepRadius*sepRadius) {
             float d = sqrtf(d2) + 1e-6f;
@@ -48,6 +56,18 @@ extern "C" __global__ void boids_step(
             cohX += x[j];
             cohY += y[j];
             cohC++;
+        }
+
+        if (si == 2 && sj == 1 && d2 < predatorRadius * predatorRadius) {
+            chaseX += -dx;
+            chaseY += -dy;
+            chaseC++;
+        }
+        if (si == 1 && sj == 2 && d2 < preyFearRadius * preyFearRadius) {
+            float d = sqrtf(d2) + 1e-6f;
+            fleeX -= dx / d;
+            fleeY -= dy / d;
+            fleeC++;
         }
     }
 
@@ -70,6 +90,22 @@ extern "C" __global__ void boids_step(
         ax += tx * cohWeight;
         ay += ty * cohWeight;
     }
+    if (chaseC > 0 && si == 2) {
+        float tx = (chaseX / (float)chaseC);
+        float ty = (chaseY / (float)chaseC);
+        ax += tx * 0.8f;
+        ay += ty * 0.8f;
+    }
+    if (fleeC > 0 && si == 1) {
+        ax += (fleeX / (float)fleeC) * 2.0f;
+        ay += (fleeY / (float)fleeC) * 2.0f;
+    }
+    if (si == 0) {
+        float centerX = width * 0.5f;
+        float centerY = height * 0.5f;
+        ax += (centerX - xi) * 0.02f;
+        ay += (centerY - yi) * 0.02f;
+    }
 
     vxi += ax * dt;
     vyi += ay * dt;
@@ -89,4 +125,3 @@ extern "C" __global__ void boids_step(
 
     x[i] = xi; y[i] = yi; vx[i] = vxi; vy[i] = vyi;
 }
-
