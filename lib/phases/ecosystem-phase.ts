@@ -16,7 +16,8 @@ interface RemoteBoidState {
 
 export class EcosystemPhase implements AnimationPhase {
   name: 'ecosystem' = 'ecosystem'
-  duration = 30000 // 30 seconds
+  // Keep the ecosystem visible much longer; don't auto-complete
+  duration = 180000 // 3 minutes
   progress = 0
   isComplete = false
   
@@ -97,9 +98,7 @@ export class EcosystemPhase implements AnimationPhase {
       this.updateLocalBoids(dt)
     }
     
-    if (this.progress >= 1) {
-      this.isComplete = true
-    }
+    // Do not auto-complete; keep ecosystem running
   }
 
   private updateLocalBoids(dt: number): void {
