@@ -35,7 +35,7 @@ export default function Error404() {
   const monitorRef = useRef<PerformanceMonitor | null>(null)
   const qualityScalerRef = useRef<AdaptiveQualityScaler | null>(null)
   const memoryManagerRef = useRef<MemoryManager | null>(null)
-  const [simulationSources, setSimulationSources] = useState<Record<PhaseType, SimulationSourceStatus>>({})
+  const [simulationSources, setSimulationSources] = useState<Partial<Record<PhaseType, SimulationSourceStatus>>>({})
   
   useEffect(() => {
     const canvas = canvasRef.current

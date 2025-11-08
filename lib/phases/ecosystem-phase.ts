@@ -1,5 +1,5 @@
 // Biological Ecosystem with Genetic Evolution
-import { fetchBoidsSimulation } from '@/lib/api/physics'
+import { fetchBoidsSimulation, runBoidsSimulation } from '@/lib/api/physics'
 import { AnimationPhase, Organism } from '../types'
 import { BoidsSystem } from '../biology/boids'
 import { COLORS } from '../constants'
@@ -304,13 +304,20 @@ export class EcosystemPhase implements AnimationPhase {
 
   private async fetchRemoteBoids(prime: boolean): Promise<void> {
     try {
-      const data = await fetchBoidsSimulation({
+      const run = await runBoidsSimulation({
         steps: prime ? 12 : 6,
         numParticles: this.remoteBoidCount,
       })
-      const samples = this.transformRemoteBoids(data)
+      const samples = this.transformRemoteBoids(run.data)
       if (!samples.length) {
         throw new Error('Empty boids payload')
+      }
+      // Report accelerator if present
+      const accel = (run.metadata?.accelerator as 'cpu' | 'cuda' | undefined)
+      if (accel) {
+        this.reportSource('server')
+        const tracker = this.sourceTracker
+        tracker.update(this.name, 'server', accel)
       }
       
       if (prime || this.remoteState.length === 0) {

@@ -10,7 +10,7 @@ import { PhaseType } from '@/lib/types'
 const TRACKED_PHASES: PhaseType[] = ['explosion', 'ecosystem']
 
 const labels: Record<'server' | 'local', string> = {
-  server: 'Server (staging GPU)',
+  server: 'Server (staging)',
   local: 'Local (browser fallback)',
 }
 
@@ -37,6 +37,7 @@ export function SimulationSourcePanel() {
     if (!TRACKED_PHASES.includes(phase)) return null
     const status = snapshot[phase]
     const mode = status?.mode ?? 'local'
+    const accel = status?.accelerator
     const since =
       status && typeof performance !== 'undefined'
         ? ((performance.now() - status.lastUpdated) / 1000).toFixed(1)
@@ -49,7 +50,7 @@ export function SimulationSourcePanel() {
       >
         <span className="uppercase tracking-wide">{phase}</span>
         <span className="text-right">
-          {labels[mode]}
+          {labels[mode]}{accel ? ` · ${accel.toUpperCase()}` : ''}
           {since && <span className="block text-[10px] text-gray-400">updated {since}s ago</span>}
         </span>
       </div>

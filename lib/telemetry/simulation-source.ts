@@ -6,6 +6,7 @@ export interface SimulationSourceStatus {
   phase: PhaseType
   mode: SimulationMode
   lastUpdated: number
+  accelerator?: 'cpu' | 'cuda'
 }
 
 type Listener = (snapshot: Record<PhaseType, SimulationSourceStatus>) => void
@@ -25,12 +26,13 @@ export class SimulationSourceTracker {
     return SimulationSourceTracker.instance
   }
 
-  update(phase: PhaseType, mode: SimulationMode): void {
+  update(phase: PhaseType, mode: SimulationMode, accelerator?: 'cpu' | 'cuda'): void {
     const timestamp = typeof performance !== 'undefined' ? performance.now() : Date.now()
     this.status[phase] = {
       phase,
       mode,
       lastUpdated: timestamp,
+      accelerator,
     }
     this.emit()
   }
