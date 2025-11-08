@@ -32,20 +32,10 @@ export const vecNormalize = (x: number, y: number): [number, number] => {
 }
 
 export const curlNoise = (x: number, y: number, t: number): [number, number] => {
-  const eps = 0.01
-  const n1 = noise(x, y + eps, t)
-  const n2 = noise(x, y - eps, t)
-  const n3 = noise(x + eps, y, t)
-  const n4 = noise(x - eps, y, t)
-  const cx = (n1 - n2) / (2 * eps)
-  const cy = (n4 - n3) / (2 * eps)
-  return [cx, cy]
-}
-
-// Simple noise function
-const noise = (x: number, y: number, t: number): number => {
-  const n = Math.sin(x * 0.01 + t) * Math.cos(y * 0.01 + t) * 
-            Math.sin((x + y) * 0.02 + t * 2)
-  return (n + 1) / 2
+  // Use proper Perlin noise implementation
+  // Lazy import to avoid circular dependencies
+  const noiseModule = require('./noise')
+  const noise = new noiseModule.PerlinNoise3D()
+  return noiseModule.curlNoise2D(noise, x, y, t, 0.1)
 }
 
