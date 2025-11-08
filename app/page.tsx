@@ -14,6 +14,7 @@ import { AdaptiveQualityScaler } from '@/lib/performance/adaptive-quality'
 import { MemoryManager, MemoryStats, MemoryEvent, MemorySample } from '@/lib/performance/memory-manager'
 import { PhaseType, DeviceTier, AnimationPhase } from '@/lib/types'
 import { TechStackDisplay } from './components/TechStack'
+import { SimulationSourcePanel } from './components/SimulationSourcePanel'
 import { SimulationSourceTracker, SimulationSourceStatus } from '@/lib/telemetry/simulation-source'
 
 export default function Error404() {
@@ -268,6 +269,9 @@ export default function Error404() {
         <div>Thermal: {thermalState}</div>
         <div>Physics: {currentSourceLabel}</div>
       </div>
+      
+      {/* Physics Source Monitor */}
+      <SimulationSourcePanel />
 
       <button
         type="button"
