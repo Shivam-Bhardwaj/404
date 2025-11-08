@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { fetchGpuInfo } from '@/lib/api/physics';
 
 interface TechStackInfo {
   gpu: string;
@@ -29,8 +30,7 @@ export function TechStackDisplay() {
   useEffect(() => {
     async function loadTechStack() {
       try {
-        const response = await fetch('/api/gpu-info');
-        const data = await response.json();
+        const data = await fetchGpuInfo();
         
         setTechStack({
           gpu: data.gpu,
@@ -223,4 +223,3 @@ export function TechStackDisplay() {
     </div>
   );
 }
-
