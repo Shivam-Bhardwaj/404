@@ -1,12 +1,17 @@
 // Adaptive Quality Scaling Based on Performance Metrics
 import { PerformanceMonitor } from '../telemetry/monitor'
 import { PerformanceConfig, DeviceTier } from '../types'
+import { MemoryManager, MemoryEvent } from './memory-manager'
 
 export class AdaptiveQualityScaler {
   private monitor: PerformanceMonitor
   private currentConfig: PerformanceConfig
   private baseConfig: PerformanceConfig
   private deviceTier: DeviceTier
+  
+  private memoryManager?: MemoryManager
+  private unsubscribeMemory?: () => void
+  private pendingMemoryEvent: MemoryEvent | null = null
   
   // Quality adjustment parameters
   private fpsTarget = 60
@@ -31,7 +36,7 @@ export class AdaptiveQualityScaler {
   
   private currentLevel = 2
   
-  constructor(monitor: PerformanceMonitor, deviceTier: DeviceTier) {
+  constructor(monitor: PerformanceMonitor, deviceTier: DeviceTier, memoryManager?: MemoryManager) {
     this.monitor = monitor
     this.deviceTier = deviceTier
     
@@ -60,14 +65,24 @@ export class AdaptiveQualityScaler {
     }
     
     this.currentConfig = { ...this.baseConfig }
+
+    if (memoryManager) {
+      this.attachMemoryManager(memoryManager)
+    }
   }
   
   update(): void {
     const now = performance.now()
-    if (now - this.lastAdjustment < this.adjustmentCooldown) return
     
     const metrics = this.monitor.getMetrics()
     const avgFPS = this.monitor.getAverageFPS()
+    
+    if (this.pendingMemoryEvent) {
+      this.applyMemoryEvent(this.pendingMemoryEvent, now)
+      this.pendingMemoryEvent = null
+    }
+    
+    if (now - this.lastAdjustment < this.adjustmentCooldown) return
     
     // Adjust quality based on performance
     if (avgFPS < this.fpsThresholdLow) {
@@ -153,6 +168,50 @@ export class AdaptiveQualityScaler {
     this.currentLevel = this.deviceTier === 'low' ? 0 : this.deviceTier === 'medium' ? 1 : 2
     this.currentConfig = { ...this.baseConfig }
     this.lastAdjustment = 0
+    this.pendingMemoryEvent = null
+  }
+
+  attachMemoryManager(memoryManager: MemoryManager): void {
+    if (this.unsubscribeMemory) {
+      this.unsubscribeMemory()
+    }
+    this.memoryManager = memoryManager
+    this.unsubscribeMemory = memoryManager.subscribe((event) => {
+      if (event.type === 'sample') {
+        return
+      }
+      this.pendingMemoryEvent = event
+    })
+  }
+
+  private applyMemoryEvent(event: MemoryEvent, now: number): void {
+    switch (event.type) {
+      case 'critical':
+        this.currentLevel = Math.max(0, this.currentLevel - 2)
+        this.applyQualityLevel()
+        this.currentConfig.enableEffects = false
+        this.currentConfig.enableShaders = false
+        this.currentConfig.particleCount = Math.floor(this.currentConfig.particleCount * 0.6)
+        this.lastAdjustment = now
+        break
+      case 'warning':
+        this.currentConfig.particleCount = Math.max(25, Math.floor(this.currentConfig.particleCount * 0.85))
+        this.currentConfig.renderQuality = Math.max(0.5, this.currentConfig.renderQuality * 0.95)
+        this.lastAdjustment = now
+        break
+      case 'cleanup':
+        this.currentLevel = Math.max(0, this.currentLevel - 1)
+        this.applyQualityLevel()
+        this.lastAdjustment = now
+        break
+    }
+  }
+
+  dispose(): void {
+    if (this.unsubscribeMemory) {
+      this.unsubscribeMemory()
+      this.unsubscribeMemory = undefined
+    }
   }
 }
 

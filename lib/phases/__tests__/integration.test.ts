@@ -1,92 +1,115 @@
 // Integration tests for phase transitions
 import { PhaseManager } from '@/lib/phases/phase-manager'
-import { TypingPhase } from '@/lib/phases/typing-phase'
-import { WhitePhase } from '@/lib/phases/white-phase'
-import { CirclePhase } from '@/lib/phases/circle-phase'
-import { ExplosionPhase } from '@/lib/phases/explosion-phase'
-import { PhaseType } from '@/lib/types'
+import { AnimationPhase, PhaseType } from '@/lib/types'
+
+class StubPhase implements AnimationPhase {
+  name: PhaseType
+  duration = 100
+  progress = 0
+  isComplete = false
+  initCalls = 0
+  cleanupCalls = 0
+
+  constructor(name: PhaseType) {
+    this.name = name
+  }
+
+  init(): void {
+    this.isComplete = false
+    this.initCalls++
+  }
+
+  update(): void {}
+
+  render(): void {}
+
+  cleanup(): void {
+    this.isComplete = false
+    this.cleanupCalls++
+  }
+}
 
 describe('Phase Integration Tests', () => {
   let phaseManager: PhaseManager
-  let phases: Map<PhaseType, any>
-  let mockCanvas: HTMLCanvasElement
-  let mockCtx: CanvasRenderingContext2D
+  let phases: Map<PhaseType, StubPhase>
+
+  const createManager = (sequence: PhaseType[], loop = true) => {
+    phaseManager = new PhaseManager(phases, sequence, loop)
+    phaseManager.reset()
+  }
+
+  const advancePhase = () => {
+    const current = phaseManager.getCurrentPhase() as StubPhase
+    current.isComplete = true
+    phaseManager.update(250)
+    phaseManager.update(250)
+  }
 
   beforeEach(() => {
-    mockCanvas = document.createElement('canvas')
-    mockCanvas.width = 800
-    mockCanvas.height = 600
-    mockCtx = mockCanvas.getContext('2d')!
-
     phases = new Map()
-    phases.set('typing', new TypingPhase())
-    phases.set('white', new WhitePhase())
-    phases.set('circle', new CirclePhase(800, 600))
-    phases.set('explosion', new ExplosionPhase(800, 600))
+    phases.set('typing', new StubPhase('typing'))
+    phases.set('white', new StubPhase('white'))
+    phases.set('circle', new StubPhase('circle'))
+    phases.set('explosion', new StubPhase('explosion'))
   })
 
-  test('should transition through all phases in sequence', () => {
-    const sequence: PhaseType[] = ['typing', 'white', 'circle', 'explosion']
-    phaseManager = new PhaseManager(phases, sequence, false)
-    phaseManager.reset()
+  test('transitions through phases in sequence and triggers init/cleanup', () => {
+    createManager(['typing', 'white', 'circle', 'explosion'], false)
 
-    // Complete typing
-    phases.get('typing')!.isComplete = true
-    phaseManager.update(100)
+    const typingPhase = phases.get('typing')!
+    const whitePhase = phases.get('white')!
+    const circlePhase = phases.get('circle')!
+
+    const initialTypingCleanup = typingPhase.cleanupCalls
+    const initialWhiteCleanup = whitePhase.cleanupCalls
+    const initialCircleCleanup = circlePhase.cleanupCalls
+
+    advancePhase()
     expect(phaseManager.getCurrentPhaseType()).toBe('white')
+    expect(typingPhase.cleanupCalls).toBe(initialTypingCleanup + 1)
 
-    // Complete white
-    phases.get('white')!.isComplete = true
-    phaseManager.update(100)
+    advancePhase()
     expect(phaseManager.getCurrentPhaseType()).toBe('circle')
+    expect(whitePhase.cleanupCalls).toBe(initialWhiteCleanup + 1)
 
-    // Complete circle
-    phases.get('circle')!.isComplete = true
-    phaseManager.update(100)
+    advancePhase()
     expect(phaseManager.getCurrentPhaseType()).toBe('explosion')
+    expect(circlePhase.cleanupCalls).toBe(initialCircleCleanup + 1)
   })
 
-  test('should handle rapid phase transitions', () => {
-    const sequence: PhaseType[] = ['typing', 'white']
-    phaseManager = new PhaseManager(phases, sequence, true)
-    phaseManager.reset()
+  test('handles rapid successive transitions without losing state', () => {
+    createManager(['typing', 'white'], true)
 
-    // Rapidly complete phases
-    for (let i = 0; i < 10; i++) {
-      const current = phaseManager.getCurrentPhase()
-      if (current) {
-        current.isComplete = true
-        phaseManager.update(100)
-      }
+    for (let i = 0; i < 6; i++) {
+      advancePhase()
     }
 
-    // Should still be functioning
     expect(phaseManager.getCurrentPhase()).toBeTruthy()
+    expect(phaseManager.getLoopCount()).toBeGreaterThan(0)
   })
 
-  test('should render all phases without errors', () => {
-    const sequence: PhaseType[] = ['typing', 'white', 'circle', 'explosion']
-    phaseManager = new PhaseManager(phases, sequence, false)
-    phaseManager.reset()
+  test('renders current phase during transition sequence', () => {
+    createManager(['typing', 'white'], false)
+    const current = phaseManager.getCurrentPhase() as StubPhase
 
-    phases.forEach((phase) => {
-      phase.init()
-      expect(() => phase.render(mockCtx)).not.toThrow()
-    })
+    const renderSpy = jest.spyOn(current, 'render')
+    const canvas = document.createElement('canvas')
+    const ctx = canvas.getContext('2d') as CanvasRenderingContext2D
+
+    phaseManager.render(ctx)
+
+    expect(renderSpy).toHaveBeenCalledWith(ctx)
   })
 
-  test('should cleanup phases properly', () => {
-    const sequence: PhaseType[] = ['typing', 'white']
-    phaseManager = new PhaseManager(phases, sequence, false)
-    phaseManager.reset()
+  test('resets loop count and index when sequence is updated', () => {
+    createManager(['typing', 'white'], true)
 
-    phases.get('typing')!.isComplete = true
-    phaseManager.update(100)
+    advancePhase()
+    expect(phaseManager.getLoopCount()).toBe(0)
 
-    // Cleanup should not throw
-    phases.forEach((phase) => {
-      expect(() => phase.cleanup()).not.toThrow()
-    })
+    phaseManager.setSequence(['typing', 'circle'])
+    expect(phaseManager.getLoopCount()).toBe(0)
+    expect(phaseManager.getCurrentPhaseType()).toBe('typing')
   })
 })
 

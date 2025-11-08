@@ -40,6 +40,13 @@
 
 ## Performance Optimization Strategy
 
+### Current Optimization Roadmap
+- **GPU Particle Pipeline**: Instanced renderer + shared WebGL context with CPU fallback; next step is migrating SPH updates to GPU transform feedback/compute.
+- **Memory Instrumentation**: Central `MemoryManager` with event telemetry, adaptive scaler hooks, and optional `?debug=memory` overlay for live diagnostics.
+- **Quality Backpressure**: Adaptive scaler now reacts to thermal, FPS, and memory events; roadmap includes particle pooling and shader tiering for extreme conditions.
+- **Ecosystem & Explosion Cleanup**: PhaseManager integration tests guarantee cleanup per loop; upcoming work will chunk ecosystem updates and cap trail buffers.
+- **Telemetry & Reporting**: Coverage gates added for high-risk modules (`PhaseManager`, `ExplosionPhase`, `MemoryManager`, `SharedWebGLContext`) to keep regressions visible.
+
 ### Tier 1: Mobile Low (Must Have)
 ```javascript
 // Simplified algorithms for 30 FPS target

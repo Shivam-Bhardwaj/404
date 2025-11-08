@@ -1,4 +1,6 @@
 // Real-time Performance Monitoring and Telemetry
+import { MemoryManager } from '../performance/memory-manager'
+
 export interface PerformanceMetrics {
   fps: number
   frameTime: number
@@ -17,7 +19,6 @@ export interface TelemetryData {
 export class PerformanceMonitor {
   private fpsHistory: number[] = []
   private frameTimeHistory: number[] = []
-  private memoryHistory: number[] = []
   private historySize = 60 // 1 second at 60fps
   private frameCount = 0
   private lastFrameTime = performance.now()
@@ -73,11 +74,10 @@ export class PerformanceMonitor {
     if ('memory' in performance) {
       const memInfo = (performance as any).memory
       const usedMB = memInfo.usedJSHeapSize / 1048576
-      this.memoryHistory.push(usedMB)
-      if (this.memoryHistory.length > this.historySize) {
-        this.memoryHistory.shift()
-      }
+      MemoryManager.getInstance().processSample(usedMB)
       this.currentMemory = usedMB
+    } else {
+      this.currentMemory = MemoryManager.getInstance().getMemoryUsage()
     }
   }
   
@@ -117,8 +117,7 @@ export class PerformanceMonitor {
   }
   
   getAverageMemory(): number {
-    if (this.memoryHistory.length === 0) return 0
-    return this.memoryHistory.reduce((a, b) => a + b, 0) / this.memoryHistory.length
+    return MemoryManager.getInstance().getStats().averageUsage
   }
   
   setParticleCount(count: number): void {
@@ -151,16 +150,7 @@ export class PerformanceMonitor {
   
   // Check for memory leaks
   detectMemoryLeak(): boolean {
-    if (this.memoryHistory.length < 60) return false
-    
-    const recent = this.memoryHistory.slice(-30)
-    const older = this.memoryHistory.slice(0, 30)
-    
-    const recentAvg = recent.reduce((a, b) => a + b, 0) / recent.length
-    const olderAvg = older.reduce((a, b) => a + b, 0) / older.length
-    
-    // If memory increased by more than 20%, potential leak
-    return recentAvg > olderAvg * 1.2
+    return MemoryManager.getInstance().detectMemoryLeak()
   }
   
   // Get performance score (0-100)
@@ -175,7 +165,6 @@ export class PerformanceMonitor {
   reset(): void {
     this.fpsHistory = []
     this.frameTimeHistory = []
-    this.memoryHistory = []
     this.frameCount = 0
     this.thermalState = 'normal'
     this.particleCount = 0

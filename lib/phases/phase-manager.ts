@@ -25,12 +25,14 @@ export class PhaseManager {
   
   getCurrentPhase(): AnimationPhase | null {
     if (this.sequence.length === 0) return null
+    if (this.currentIndex >= this.sequence.length) return null
     const phaseType = this.sequence[this.currentIndex]
     return this.phases.get(phaseType) || null
   }
   
   getCurrentPhaseType(): PhaseType | null {
     if (this.sequence.length === 0) return null
+    if (this.currentIndex >= this.sequence.length) return null
     return this.sequence[this.currentIndex]
   }
   

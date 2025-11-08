@@ -1,122 +1,139 @@
+'use strict'
+
 // Tests for PhaseManager
 import { PhaseManager } from '@/lib/phases/phase-manager'
-import { TypingPhase } from '@/lib/phases/typing-phase'
-import { WhitePhase } from '@/lib/phases/white-phase'
-import { PhaseType } from '@/lib/types'
+import { AnimationPhase, PhaseType } from '@/lib/types'
+
+class StubPhase implements AnimationPhase {
+  name: PhaseType
+  duration = 100
+  progress = 0
+  isComplete = false
+  initCalls = 0
+  cleanupCalls = 0
+  renderMock = jest.fn()
+  updateMock = jest.fn()
+
+  constructor(name: PhaseType) {
+    this.name = name
+  }
+
+  init(): void {
+    this.progress = 0
+    this.isComplete = false
+    this.initCalls++
+  }
+
+  update(dt: number): void {
+    this.updateMock(dt)
+  }
+
+  render(ctx: CanvasRenderingContext2D): void {
+    this.renderMock(ctx)
+  }
+
+  cleanup(): void {
+    this.cleanupCalls++
+    this.isComplete = false
+  }
+}
 
 describe('PhaseManager', () => {
   let phaseManager: PhaseManager
-  let phases: Map<PhaseType, any>
+  let phases: Map<PhaseType, StubPhase>
   let mockCanvas: HTMLCanvasElement
   let mockCtx: CanvasRenderingContext2D
 
+  const advanceTransition = (manager: PhaseManager) => {
+    manager.update(250)
+    manager.update(250)
+  }
+
   beforeEach(() => {
     mockCanvas = document.createElement('canvas')
-    mockCanvas.width = 800
-    mockCanvas.height = 600
-    mockCtx = mockCanvas.getContext('2d')!
+    mockCtx = mockCanvas.getContext('2d') as CanvasRenderingContext2D
 
     phases = new Map()
-    phases.set('typing', new TypingPhase())
-    phases.set('white', new WhitePhase())
+    phases.set('typing', new StubPhase('typing'))
+    phases.set('white', new StubPhase('white'))
 
-    const sequence: PhaseType[] = ['typing', 'white']
-    phaseManager = new PhaseManager(phases, sequence, true)
+    phaseManager = new PhaseManager(phases, ['typing', 'white'], true)
+    phaseManager.reset()
   })
 
   test('should initialize with first phase', () => {
-    phaseManager.reset()
-    const currentPhase = phaseManager.getCurrentPhase()
+    const currentPhase = phaseManager.getCurrentPhase() as StubPhase
     expect(currentPhase).toBeTruthy()
-    expect(currentPhase?.name).toBe('typing')
+    expect(currentPhase.name).toBe('typing')
+    expect(currentPhase.initCalls).toBe(1)
   })
 
-  test('should transition to next phase when current completes', () => {
-    phaseManager.reset()
+  test('should transition to next phase and call cleanup/init appropriately', () => {
     const typingPhase = phases.get('typing')!
-    
-    // Complete the typing phase
+    const whitePhase = phases.get('white')!
+    const initialCleanup = typingPhase.cleanupCalls
+
     typingPhase.isComplete = true
-    
-    phaseManager.update(100)
-    phaseManager.update(100)
-    
-    const currentPhase = phaseManager.getCurrentPhase()
-    expect(currentPhase?.name).toBe('white')
+    advanceTransition(phaseManager)
+
+    expect(typingPhase.cleanupCalls).toBe(initialCleanup + 1)
+    expect(whitePhase.initCalls).toBe(1)
+    expect(phaseManager.getCurrentPhaseType()).toBe('white')
   })
 
   test('should loop back to first phase when sequence completes', () => {
-    phaseManager.reset()
-    
-    // Complete typing phase
     const typingPhase = phases.get('typing')!
-    typingPhase.init()
-    typingPhase.isComplete = true
-    phaseManager.update(100)
-    phaseManager.update(100) // Extra update to trigger transition
-    
-    // Complete white phase
     const whitePhase = phases.get('white')!
-    whitePhase.init()
+    const initialTypingCleanup = typingPhase.cleanupCalls
+    const initialWhiteCleanup = whitePhase.cleanupCalls
+
+    typingPhase.isComplete = true
+    advanceTransition(phaseManager)
+
     whitePhase.isComplete = true
-    phaseManager.update(100)
-    phaseManager.update(100) // Extra update to trigger transition
-    
-    // Should loop back to typing
+    advanceTransition(phaseManager)
+
     const currentPhase = phaseManager.getCurrentPhase()
     expect(currentPhase?.name).toBe('typing')
+    expect(typingPhase.cleanupCalls).toBe(initialTypingCleanup + 2)
+    expect(whitePhase.cleanupCalls).toBe(initialWhiteCleanup + 2)
     expect(phaseManager.getLoopCount()).toBe(1)
   })
 
   test('should increment loop count on each loop', () => {
-    phaseManager.reset()
-    
-    // Complete two full cycles - need to properly simulate transitions
-    for (let cycle = 0; cycle < 2; cycle++) {
-      // First phase
-      let currentPhase = phaseManager.getCurrentPhase()
+    for (let i = 0; i < 3; i++) {
+      const currentPhase = phaseManager.getCurrentPhase()
       if (currentPhase) {
-        currentPhase.init()
         currentPhase.isComplete = true
-        // Multiple updates to ensure transition completes
-        for (let i = 0; i < 5; i++) {
-          phaseManager.update(100)
-        }
-      }
-      
-      // Second phase
-      currentPhase = phaseManager.getCurrentPhase()
-      if (currentPhase) {
-        currentPhase.init()
-        currentPhase.isComplete = true
-        // Multiple updates to ensure transition completes
-        for (let i = 0; i < 5; i++) {
-          phaseManager.update(100)
-        }
+        advanceTransition(phaseManager)
       }
     }
-    
-    // After 2 cycles, loop count should be 2
+
     expect(phaseManager.getLoopCount()).toBeGreaterThanOrEqual(1)
   })
 
   test('should render current phase', () => {
-    phaseManager.reset()
-    expect(() => phaseManager.render(mockCtx)).not.toThrow()
+    const currentPhase = phaseManager.getCurrentPhase() as StubPhase
+    phaseManager.render(mockCtx)
+    expect(currentPhase.renderMock).toHaveBeenCalledWith(mockCtx)
   })
 
   test('should handle non-looping mode', () => {
     const nonLoopingManager = new PhaseManager(phases, ['typing', 'white'], false)
     nonLoopingManager.reset()
-    
-    phases.get('typing')!.isComplete = true
-    nonLoopingManager.update(100)
-    
-    phases.get('white')!.isComplete = true
-    nonLoopingManager.update(100)
-    
-    // Should not loop
+
+    const first = phases.get('typing')!
+    const second = phases.get('white')!
+
+    first.isComplete = true
+    advanceTransition(nonLoopingManager)
+
+    second.isComplete = true
+    advanceTransition(nonLoopingManager)
+
     expect(nonLoopingManager.getLoopCount()).toBe(0)
+    expect(nonLoopingManager.getCurrentPhase()).toBeNull()
+    expect(nonLoopingManager.getCurrentPhaseType()).toBeNull()
   })
 })
 

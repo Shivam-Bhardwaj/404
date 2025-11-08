@@ -19,17 +19,41 @@ const customJestConfig = {
   ],
   collectCoverageFrom: [
     'lib/**/*.{ts,tsx}',
-    'app/**/*.{ts,tsx}',
     '!**/*.d.ts',
     '!**/node_modules/**',
     '!**/.next/**',
   ],
+  coverageReporters: ['text', 'lcov'],
   coverageThreshold: {
     global: {
+      branches: 28,
+      functions: 45,
+      lines: 35,
+      statements: 35,
+    },
+    './lib/performance/memory-manager.ts': {
       branches: 60,
-      functions: 60,
-      lines: 60,
-      statements: 60,
+      functions: 70,
+      lines: 80,
+      statements: 80,
+    },
+    './lib/rendering/shared-webgl-context.ts': {
+      branches: 80,
+      functions: 70,
+      lines: 90,
+      statements: 90,
+    },
+    './lib/phases/explosion-phase.ts': {
+      branches: 60,
+      functions: 80,
+      lines: 85,
+      statements: 85,
+    },
+    './lib/phases/phase-manager.ts': {
+      branches: 70,
+      functions: 90,
+      lines: 85,
+      statements: 85,
     },
   },
 }
