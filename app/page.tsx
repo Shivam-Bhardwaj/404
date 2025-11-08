@@ -174,6 +174,7 @@ export default function Error404() {
         phase.cleanup()
       })
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
   
   return (

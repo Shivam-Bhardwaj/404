@@ -1,5 +1,5 @@
 // Adaptive Quality Scaling Based on Performance Metrics
-import { PerformanceMonitor } from './monitor'
+import { PerformanceMonitor } from '../telemetry/monitor'
 import { PerformanceConfig, DeviceTier } from '../types'
 
 export class AdaptiveQualityScaler {
