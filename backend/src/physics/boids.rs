@@ -3,9 +3,11 @@
 use crate::cuda::CudaContext;
 use anyhow::Result;
 use rand::Rng;
-use rustacuda::prelude::*;
+use rustacuda::launch;
 use rustacuda::memory::DeviceBuffer;
 use rustacuda::memory::DeviceCopy;
+use rustacuda::prelude::*;
+use std::ffi::CString;
 use std::sync::Arc;
 
 #[repr(C)]
@@ -24,6 +26,15 @@ pub struct BoidsSimulation {
     context: Arc<CudaContext>,
     num_boids: usize,
     boids: DeviceBuffer<Boid>,
+    // SoA device buffers (used if CUDA kernel is available)
+    d_x: Option<DeviceBuffer<f32>>,
+    d_y: Option<DeviceBuffer<f32>>,
+    d_vx: Option<DeviceBuffer<f32>>,
+    d_vy: Option<DeviceBuffer<f32>>,
+    d_species: Option<DeviceBuffer<u8>>,
+    ptx: Option<String>,
+    soa_dirty: bool,
+    last_used_cuda: bool,
     // Boids parameters
     separation_radius: f32,
     alignment_radius: f32,
@@ -51,11 +62,62 @@ impl BoidsSimulation {
         
         let boids = DeviceBuffer::from_slice(&host_boids)
             .map_err(|e| anyhow::anyhow!("Failed to allocate boids: {:?}", e))?;
-        
+        // Try to prepare CUDA kernel (PTX provided by build.rs via BOIDS_PTX)
+        let mut d_x = None;
+        let mut d_y = None;
+        let mut d_vx = None;
+        let mut d_vy = None;
+        let mut d_species = None;
+        let mut ptx_opt = None;
+        let mut soa_dirty = true;
+
+        if let Some(ptx_path) = option_env!("BOIDS_PTX") {
+            if let Ok(ptx) = std::fs::read_to_string(ptx_path) {
+                // Initialize SoA buffers with current values now; PTX will be used on-demand
+                let mut hx = vec![0.0f32; num_boids];
+                let mut hy = vec![0.0f32; num_boids];
+                let mut hvx = vec![0.0f32; num_boids];
+                let mut hvy = vec![0.0f32; num_boids];
+                let mut hs = vec![0u8; num_boids];
+                for (i, b) in host_boids.iter().enumerate() {
+                    hx[i] = b.x;
+                    hy[i] = b.y;
+                    hvx[i] = b.vx;
+                    hvy[i] = b.vy;
+                    hs[i] = b.species;
+                }
+                let dx = DeviceBuffer::from_slice(&hx)
+                    .map_err(|e| anyhow::anyhow!("alloc d_x: {:?}", e))?;
+                let dy = DeviceBuffer::from_slice(&hy)
+                    .map_err(|e| anyhow::anyhow!("alloc d_y: {:?}", e))?;
+                let dvx = DeviceBuffer::from_slice(&hvx)
+                    .map_err(|e| anyhow::anyhow!("alloc d_vx: {:?}", e))?;
+                let dvy = DeviceBuffer::from_slice(&hvy)
+                    .map_err(|e| anyhow::anyhow!("alloc d_vy: {:?}", e))?;
+                let dspec = DeviceBuffer::from_slice(&hs)
+                    .map_err(|e| anyhow::anyhow!("alloc d_species: {:?}", e))?;
+                d_x = Some(dx);
+                d_y = Some(dy);
+                d_vx = Some(dvx);
+                d_vy = Some(dvy);
+                d_species = Some(dspec);
+                ptx_opt = Some(ptx);
+                soa_dirty = false;
+            }
+        }
+
         Ok(Self {
             context: Arc::clone(context),
             num_boids,
             boids,
+            d_x,
+            d_y,
+            d_vx,
+            d_vy,
+            d_species,
+            ptx: ptx_opt,
+            soa_dirty,
+            last_used_cuda: false,
             separation_radius: 0.05,
             alignment_radius: 0.1,
             cohesion_radius: 0.15,
@@ -69,8 +131,112 @@ impl BoidsSimulation {
     }
 
     pub fn step(&mut self, dt: f32) -> Result<()> {
-        // Copy boids to host for computation
-        // TODO: Replace with CUDA kernel
+        if let (Some(ptx), Some(dx), Some(dy), Some(dvx), Some(dvy), Some(dspecies)) = (
+            self.ptx.as_ref(),
+            self.d_x.as_mut(),
+            self.d_y.as_mut(),
+            self.d_vx.as_mut(),
+            self.d_vy.as_mut(),
+            self.d_species.as_mut(),
+        ) {
+            if self.soa_dirty {
+                let mut host_boids = vec![Boid::default(); self.num_boids];
+                self.boids
+                    .copy_to(&mut host_boids[..])
+                    .map_err(|e| anyhow::anyhow!("Failed to copy boids: {:?}", e))?;
+                let mut hx = vec![0.0f32; self.num_boids];
+                let mut hy = vec![0.0f32; self.num_boids];
+                let mut hvx = vec![0.0f32; self.num_boids];
+                let mut hvy = vec![0.0f32; self.num_boids];
+                let mut hs = vec![0u8; self.num_boids];
+                for i in 0..self.num_boids {
+                    let b = host_boids[i];
+                    hx[i] = b.x;
+                    hy[i] = b.y;
+                    hvx[i] = b.vx;
+                    hvy[i] = b.vy;
+                    hs[i] = b.species;
+                }
+                dx.copy_from(&hx[..]).map_err(|e| anyhow::anyhow!("sync hx->dx: {:?}", e))?;
+                dy.copy_from(&hy[..]).map_err(|e| anyhow::anyhow!("sync hy->dy: {:?}", e))?;
+                dvx.copy_from(&hvx[..]).map_err(|e| anyhow::anyhow!("sync hvx->dvx: {:?}", e))?;
+                dvy.copy_from(&hvy[..]).map_err(|e| anyhow::anyhow!("sync hvy->dvy: {:?}", e))?;
+                dspecies
+                    .copy_from(&hs[..])
+                    .map_err(|e| anyhow::anyhow!("sync species: {:?}", e))?;
+                self.soa_dirty = false;
+            }
+
+            let ptx_c = CString::new(ptx.as_str()).unwrap();
+            let module = Module::load_from_string(&ptx_c)
+                .map_err(|e| anyhow::anyhow!("Failed to load boids PTX: {:?}", e))?;
+            let func = module
+                .get_function(&CString::new("boids_step").unwrap())
+                .map_err(|e| anyhow::anyhow!("Failed to get boids_step: {:?}", e))?;
+            let stream = Stream::new(StreamFlags::DEFAULT, None)
+                .map_err(|e| anyhow::anyhow!("Failed to create stream: {:?}", e))?;
+
+            let n = self.num_boids as i32;
+            let block = (128u32, 1u32, 1u32);
+            let grid = (((self.num_boids as u32) + block.0 - 1) / block.0, 1u32, 1u32);
+            unsafe {
+                launch!(
+                    func<<<grid, block, 0, stream>>>(
+                        n,
+                        dt as f32,
+                        self.separation_radius as f32,
+                        self.alignment_radius as f32,
+                        self.cohesion_radius as f32,
+                        1.5f32,
+                        1.0f32,
+                        0.3f32,
+                        self.max_speed as f32,
+                        dspecies.as_device_ptr(),
+                        dx.as_device_ptr(),
+                        dy.as_device_ptr(),
+                        dvx.as_device_ptr(),
+                        dvy.as_device_ptr(),
+                        1_000i32,
+                        1_000i32
+                    )
+                )
+                .map_err(|e| anyhow::anyhow!("boids_step launch failed: {:?}", e))?;
+            }
+            stream
+                .synchronize()
+                .map_err(|e| anyhow::anyhow!("boids_step sync failed: {:?}", e))?;
+
+            let mut hx = vec![0.0f32; self.num_boids];
+            let mut hy = vec![0.0f32; self.num_boids];
+            let mut hvx = vec![0.0f32; self.num_boids];
+            let mut hvy = vec![0.0f32; self.num_boids];
+            let mut hs = vec![0u8; self.num_boids];
+            dx.copy_to(&mut hx[..]).map_err(|e| anyhow::anyhow!("dx->hx: {:?}", e))?;
+            dy.copy_to(&mut hy[..]).map_err(|e| anyhow::anyhow!("dy->hy: {:?}", e))?;
+            dvx.copy_to(&mut hvx[..]).map_err(|e| anyhow::anyhow!("dvx->hvx: {:?}", e))?;
+            dvy.copy_to(&mut hvy[..]).map_err(|e| anyhow::anyhow!("dvy->hvy: {:?}", e))?;
+            dspecies
+                .copy_to(&mut hs[..])
+                .map_err(|e| anyhow::anyhow!("species copy: {:?}", e))?;
+            let mut host_boids = vec![Boid::default(); self.num_boids];
+            for i in 0..self.num_boids {
+                host_boids[i] = Boid {
+                    x: hx[i],
+                    y: hy[i],
+                    vx: hvx[i],
+                    vy: hvy[i],
+                    species: hs[i],
+                };
+            }
+            self.boids
+                .copy_from(&host_boids[..])
+                .map_err(|e| anyhow::anyhow!("copy back boids: {:?}", e))?;
+            self.last_used_cuda = true;
+            self.soa_dirty = false;
+            return Ok(());
+        }
+
+        // CPU fallback
         let mut host_boids = vec![Boid::default(); self.num_boids];
         self.boids.copy_to(&mut host_boids[..])
             .map_err(|e| anyhow::anyhow!("Failed to copy boids: {:?}", e))?;
@@ -188,7 +354,8 @@ impl BoidsSimulation {
         // Copy back to device
         self.boids.copy_from(&host_boids[..])
             .map_err(|e| anyhow::anyhow!("Failed to copy boids back: {:?}", e))?;
-        
+        self.last_used_cuda = false;
+        self.soa_dirty = true;
         Ok(())
     }
 
@@ -206,6 +373,10 @@ impl BoidsSimulation {
         }
         
         Ok(result)
+    }
+
+    pub fn used_cuda(&self) -> bool {
+        self.last_used_cuda
     }
 }
 

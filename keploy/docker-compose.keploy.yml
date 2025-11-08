@@ -1,0 +1,12 @@
+version: '3.8'
+services:
+  keploy:
+    image: keploy/keploy:latest
+    container_name: keploy
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - ./keploy/data:/usr/local/var/keploy
+    command: keploy proxy --port 3100 --target 3001 --host 127.0.0.1
+    # This proxies 3100 -> 127.0.0.1:3001 and records/replays traffic
+

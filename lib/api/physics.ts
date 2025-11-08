@@ -11,6 +11,7 @@ interface SimulationResponse {
     simulation_type: string
     num_particles: number
     computation_time_ms: number
+    accelerator?: 'cpu' | 'cuda'
   }
   error?: string
 }
@@ -18,6 +19,11 @@ interface SimulationResponse {
 export interface GpuInfo {
   gpu: string
   status: string
+}
+
+export interface SimulationRun {
+  data: number[]
+  metadata?: SimulationResponse['metadata']
 }
 
 const buildUrl = (path: string): string => {
@@ -113,4 +119,20 @@ export const fetchGrayScottSimulation = async (options?: {
   return runSimulation('grayscott', {
     steps: options?.steps ?? 4,
   })
+}
+
+export const runBoidsSimulation = async (options?: {
+  steps?: number
+  numParticles?: number
+}): Promise<SimulationRun> => {
+  const response = await requestJson<SimulationResponse>(`/api/simulate/boids`, {
+    method: 'POST',
+    body: JSON.stringify({
+      simulation_type: 'boids',
+      steps: options?.steps ?? 6,
+      num_particles: options?.numParticles ?? 180,
+    }),
+  })
+  if (!response.success || !response.data) throw new Error(response.error ?? 'No data')
+  return { data: response.data, metadata: response.metadata }
 }

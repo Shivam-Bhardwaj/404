@@ -20,6 +20,7 @@ fn main() {
         .args([
             "-ptx",
             "-arch=sm_61",
+            "-allow-unsupported-compiler",
             "src/kernels/boids.cu",
             "-o",
         ])
@@ -34,4 +35,3 @@ fn main() {
 
     println!("cargo:rustc-env=BOIDS_PTX={}", ptx_out.display());
 }
-

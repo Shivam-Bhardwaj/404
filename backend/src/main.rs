@@ -127,7 +127,7 @@ async fn simulate_boids(
     
     let steps = request.steps.unwrap_or(1);
     
-    let (boids, duration, num_boids) = {
+    let (boids, duration, num_boids, accelerator) = {
         let mut sim = state.boids_simulation
             .lock()
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
@@ -139,7 +139,8 @@ async fn simulate_boids(
         }
         let boids = sim.get_boids()
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-        (boids, start.elapsed(), num_boids)
+        let acc = if sim.used_cuda() { "cuda" } else { "cpu" };
+        (boids, start.elapsed(), num_boids, acc.to_string())
     };
     
     Ok(Json(SimulationResponse {
@@ -149,7 +150,7 @@ async fn simulate_boids(
             simulation_type: "boids".to_string(),
             num_particles: num_boids,
             computation_time_ms: duration.as_millis(),
-            accelerator: "cpu".to_string(),
+            accelerator,
         }),
         error: None,
     }))
