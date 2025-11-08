@@ -72,9 +72,14 @@ const runSimulation = async (
   kind: SimulationKind,
   body: Record<string, unknown> = {}
 ): Promise<number[]> => {
+  const payload = {
+    simulation_type: kind,
+    ...body,
+  }
+
   const response = await requestJson<SimulationResponse>(`/api/simulate/${kind}`, {
     method: 'POST',
-    body: JSON.stringify(body),
+    body: JSON.stringify(payload),
   })
 
   if (!response.success || !response.data) {
