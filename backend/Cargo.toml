@@ -1,0 +1,46 @@
+[package]
+name = "physics-backend"
+version = "0.1.0"
+edition = "2021"
+build = "build.rs"
+
+[dependencies]
+# CUDA bindings - using rustacuda for stable API
+rustacuda = "0.1"
+rustacuda_derive = "0.1"
+rustacuda_core = "0.1"
+nvrtc = { version = "0.1", optional = true }
+# Async runtime for API server
+tokio = { version = "1.35", features = ["full"] }
+# HTTP server
+axum = "0.7"
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+# Error handling
+anyhow = "1.0"
+thiserror = "1.0"
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+# Configuration
+config = "0.14"
+# Randomness for simulation seeds
+rand = "0.8"
+
+[features]
+default = []
+cuda-kernel = ["nvrtc"]
+
+[dev-dependencies]
+# Testing and benchmarking
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bin]]
+name = "physics-backend"
+path = "src/main.rs"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1

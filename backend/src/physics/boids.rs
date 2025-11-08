@@ -1,0 +1,250 @@
+// Boids algorithm simulation
+// Extended Reynolds rules with genetic evolution
+use crate::cuda::CudaContext;
+use anyhow::Result;
+use rand::Rng;
+use rustacuda::prelude::*;
+use rustacuda::memory::DeviceBuffer;
+use rustacuda::memory::DeviceCopy;
+use std::sync::Arc;
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct Boid {
+    pub x: f32,
+    pub y: f32,
+    pub vx: f32,
+    pub vy: f32,
+    pub species: u8,
+}
+
+unsafe impl DeviceCopy for Boid {}
+
+pub struct BoidsSimulation {
+    context: Arc<CudaContext>,
+    num_boids: usize,
+    boids: DeviceBuffer<Boid>,
+    // Boids parameters
+    separation_radius: f32,
+    alignment_radius: f32,
+    cohesion_radius: f32,
+    max_speed: f32,
+    max_force: f32,
+}
+
+impl BoidsSimulation {
+    pub fn new(context: &Arc<CudaContext>, num_boids: usize) -> Result<Self> {
+        // Context should already be initialized by caller
+        
+        // Initialize boids randomly
+        let mut host_boids = Vec::new();
+        let mut rng = rand::thread_rng();
+        for _ in 0..num_boids {
+            host_boids.push(Boid {
+                x: rng.gen::<f32>(),
+                y: rng.gen::<f32>(),
+                vx: rng.gen_range(-0.03..0.03),
+                vy: rng.gen_range(-0.03..0.03),
+                species: rng.gen_range(0..=3),
+            });
+        }
+        
+        let boids = DeviceBuffer::from_slice(&host_boids)
+            .map_err(|e| anyhow::anyhow!("Failed to allocate boids: {:?}", e))?;
+        
+        Ok(Self {
+            context: Arc::clone(context),
+            num_boids,
+            boids,
+            separation_radius: 0.05,
+            alignment_radius: 0.1,
+            cohesion_radius: 0.15,
+            max_speed: 0.05,
+            max_force: 0.01,
+        })
+    }
+
+    pub fn num_boids(&self) -> usize {
+        self.num_boids
+    }
+
+    pub fn step(&mut self, dt: f32) -> Result<()> {
+        // Copy boids to host for computation
+        // TODO: Replace with CUDA kernel
+        let mut host_boids = vec![Boid::default(); self.num_boids];
+        self.boids.copy_to(&mut host_boids[..])
+            .map_err(|e| anyhow::anyhow!("Failed to copy boids: {:?}", e))?;
+        
+        // Boids algorithm: Separation, Alignment, Cohesion
+        for i in 0..self.num_boids {
+            let mut sep_x = 0.0;
+            let mut sep_y = 0.0;
+            let mut align_x = 0.0;
+            let mut align_y = 0.0;
+            let mut coh_x = 0.0;
+            let mut coh_y = 0.0;
+            let mut sep_count = 0;
+            let mut align_count = 0;
+            let mut coh_count = 0;
+            
+            let bi = &host_boids[i];
+            
+            for j in 0..self.num_boids {
+                if i == j { continue; }
+                
+                let bj = &host_boids[j];
+                let dx = bi.x - bj.x;
+                let dy = bi.y - bj.y;
+                let dist_sq = dx * dx + dy * dy;
+                let dist = dist_sq.sqrt();
+                
+                // Only consider same species (simplified)
+                if bi.species == bj.species {
+                    // Separation
+                    if dist < self.separation_radius && dist > 0.0 {
+                        sep_x += dx / dist;
+                        sep_y += dy / dist;
+                        sep_count += 1;
+                    }
+                    
+                    // Alignment
+                    if dist < self.alignment_radius {
+                        align_x += bj.vx;
+                        align_y += bj.vy;
+                        align_count += 1;
+                    }
+                    
+                    // Cohesion
+                    if dist < self.cohesion_radius {
+                        coh_x += bj.x;
+                        coh_y += bj.y;
+                        coh_count += 1;
+                    }
+                }
+            }
+            
+            // Calculate forces
+            let mut fx = 0.0;
+            let mut fy = 0.0;
+            
+            // Separation force
+            if sep_count > 0 {
+                let sep_mag = (sep_x * sep_x + sep_y * sep_y).sqrt();
+                if sep_mag > 0.0 {
+                    fx += (sep_x / sep_mag) * self.max_force;
+                    fy += (sep_y / sep_mag) * self.max_force;
+                }
+            }
+            
+            // Alignment force
+            if align_count > 0 {
+                let align_mag = (align_x * align_x + align_y * align_y).sqrt();
+                if align_mag > 0.0 {
+                    let target_vx = (align_x / align_count as f32) - bi.vx;
+                    let target_vy = (align_y / align_count as f32) - bi.vy;
+                    let target_mag = (target_vx * target_vx + target_vy * target_vy).sqrt();
+                    if target_mag > 0.0 {
+                        fx += (target_vx / target_mag) * self.max_force * 0.5;
+                        fy += (target_vy / target_mag) * self.max_force * 0.5;
+                    }
+                }
+            }
+            
+            // Cohesion force
+            if coh_count > 0 {
+                let avg_x = coh_x / coh_count as f32;
+                let avg_y = coh_y / coh_count as f32;
+                let target_x = avg_x - bi.x;
+                let target_y = avg_y - bi.y;
+                let target_mag = (target_x * target_x + target_y * target_y).sqrt();
+                if target_mag > 0.0 {
+                    fx += (target_x / target_mag) * self.max_force * 0.3;
+                    fy += (target_y / target_mag) * self.max_force * 0.3;
+                }
+            }
+            
+            // Update velocity
+            host_boids[i].vx += fx * dt;
+            host_boids[i].vy += fy * dt;
+            
+            // Limit speed
+            let speed = (host_boids[i].vx * host_boids[i].vx + host_boids[i].vy * host_boids[i].vy).sqrt();
+            if speed > self.max_speed {
+                host_boids[i].vx = (host_boids[i].vx / speed) * self.max_speed;
+                host_boids[i].vy = (host_boids[i].vy / speed) * self.max_speed;
+            }
+            
+            // Update position
+            host_boids[i].x += host_boids[i].vx * dt;
+            host_boids[i].y += host_boids[i].vy * dt;
+            
+            // Wrap around boundaries
+            if host_boids[i].x < 0.0 { host_boids[i].x += 1.0; }
+            if host_boids[i].x > 1.0 { host_boids[i].x -= 1.0; }
+            if host_boids[i].y < 0.0 { host_boids[i].y += 1.0; }
+            if host_boids[i].y > 1.0 { host_boids[i].y -= 1.0; }
+        }
+        
+        // Copy back to device
+        self.boids.copy_from(&host_boids[..])
+            .map_err(|e| anyhow::anyhow!("Failed to copy boids back: {:?}", e))?;
+        
+        Ok(())
+    }
+
+    pub fn get_boids(&self) -> Result<Vec<f32>> {
+        let mut host_boids = vec![Boid::default(); self.num_boids];
+        self.boids.copy_to(&mut host_boids[..])
+            .map_err(|e| anyhow::anyhow!("Failed to copy boids: {:?}", e))?;
+        
+        let mut result = Vec::with_capacity(self.num_boids * 4);
+        for b in host_boids {
+            result.push(b.x);
+            result.push(b.y);
+            result.push(b.vx);
+            result.push(b.vy);
+        }
+        
+        Ok(result)
+    }
+}
+
+unsafe impl Send for BoidsSimulation {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cuda::init_cuda_in_thread;
+
+    fn setup_test_context() -> (Arc<CudaContext>, rustacuda::context::Context) {
+        init_cuda_in_thread().expect("Failed to init CUDA in test thread");
+        let context_obj = rustacuda::prelude::Context::create_and_push(
+            rustacuda::prelude::ContextFlags::MAP_HOST | rustacuda::prelude::ContextFlags::SCHED_AUTO,
+            rustacuda::prelude::Device::get_device(0).expect("Failed to get device")
+        ).expect("Failed to create context");
+        (Arc::new(CudaContext::new().expect("Failed to create CUDA context")), context_obj)
+    }
+
+    #[test]
+    fn test_boids_initialization() {
+        let (context, _context_guard) = setup_test_context();
+        let sim = BoidsSimulation::new(&context, 1000);
+        assert!(sim.is_ok(), "Boids simulation should initialize");
+    }
+
+    #[test]
+    fn test_boids_step() {
+        let (context, _context_guard) = setup_test_context();
+        let mut sim = BoidsSimulation::new(&context, 1000).unwrap();
+        let result = sim.step(0.016);
+        assert!(result.is_ok(), "Boids step should succeed");
+    }
+
+    #[test]
+    fn test_boids_count() {
+        let (context, _context_guard) = setup_test_context();
+        let sim = BoidsSimulation::new(&context, 1000).unwrap();
+        let boids = sim.get_boids().unwrap();
+        assert_eq!(boids.len(), 1000 * 4, "Should return boid data");
+    }
+}
