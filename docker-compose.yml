@@ -1,0 +1,81 @@
+version: '3.8'
+
+services:
+  app-blue:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: 404-app-blue
+    restart: unless-stopped
+    networks:
+      - web
+      - app-network
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.app-blue.rule=Host(`too.foo`) && PathPrefix(`/`)"
+      - "traefik.http.routers.app-blue.entrypoints=websecure"
+      - "traefik.http.routers.app-blue.tls.certresolver=letsencrypt"
+      - "traefik.http.services.app-blue.loadbalancer.server.port=3000"
+      - "traefik.http.routers.app-blue.middlewares=app-blue@docker"
+      - "traefik.http.middlewares.app-blue.weight=100"
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/api/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+
+  app-green:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: 404-app-green
+    restart: unless-stopped
+    networks:
+      - web
+      - app-network
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.app-green.rule=Host(`too.foo`) && PathPrefix(`/`)"
+      - "traefik.http.routers.app-green.entrypoints=websecure"
+      - "traefik.http.routers.app-green.tls.certresolver=letsencrypt"
+      - "traefik.http.services.app-green.loadbalancer.server.port=3000"
+      - "traefik.http.routers.app-green.middlewares=app-green@docker"
+      - "traefik.http.middlewares.app-green.weight=0"
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/api/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+    profiles:
+      - production
+
+networks:
+  web:
+    external: true
+  app-network:
+    driver: bridge
+
