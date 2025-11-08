@@ -13,6 +13,7 @@ import { PerformanceMonitor } from '@/lib/telemetry/monitor'
 import { AdaptiveQualityScaler } from '@/lib/performance/adaptive-quality'
 import { MemoryManager, MemoryStats, MemoryEvent, MemorySample } from '@/lib/performance/memory-manager'
 import { PhaseType, DeviceTier, AnimationPhase } from '@/lib/types'
+import { TechStackDisplay } from './components/TechStack'
 
 export default function Error404() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -294,6 +295,9 @@ export default function Error404() {
       <div className="absolute bottom-4 left-4 text-red-500 font-mono text-sm opacity-50">
         ERROR 404: The page you seek has evolved beyond existence
       </div>
+      
+      {/* Tech Stack Display */}
+      <TechStackDisplay />
     </div>
   )
 }
