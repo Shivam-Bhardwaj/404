@@ -7,6 +7,7 @@ import { randomRange, curlNoise, lerp } from '../utils/math'
 import { WebGLRenderer } from '../rendering/webgl-renderer'
 import { GPUParticleRenderer } from '../rendering/particle-gpu-renderer'
 import { SharedWebGLContext } from '../rendering/shared-webgl-context'
+import { SimulationSourceTracker } from '../telemetry/simulation-source'
 
 interface RemoteParticleState {
   x: number
@@ -49,6 +50,7 @@ export class ExplosionPhase implements AnimationPhase {
   private webglRenderer: WebGLRenderer | null = null
   private gpuParticleRenderer: GPUParticleRenderer | null = null
   private useGPU = false
+  private sourceTracker = SimulationSourceTracker.getInstance()
   
   constructor(width: number, height: number, canvas?: HTMLCanvasElement) {
     this.sph = new SPHSimulation(width, height)
@@ -131,6 +133,7 @@ export class ExplosionPhase implements AnimationPhase {
   }
 
   private updateLocalParticles(dt: number): void {
+    this.reportSource('local')
     for (const p of this.sph.particles) {
       const [cx, cy] = curlNoise(p.x * 0.01, p.y * 0.01, this.time)
       p.vx += cx * 0.5
@@ -143,6 +146,7 @@ export class ExplosionPhase implements AnimationPhase {
 
   private updateRemoteParticles(dt: number): void {
     if (this.remoteTargetState && this.remoteState.length > 0) {
+      this.reportSource('server')
       this.remoteProgress = Math.min(
         1,
         this.remoteProgress + dt / this.remoteBlendDuration
@@ -164,6 +168,7 @@ export class ExplosionPhase implements AnimationPhase {
     }
     
     if (this.remoteState.length > 0) {
+      this.reportSource('server')
       this.applyRemoteSamples(this.remoteState)
       const now = this.now()
       if (!this.remoteFetchPending && now - this.remoteLastSample > this.remoteBlendDuration) {
@@ -174,6 +179,9 @@ export class ExplosionPhase implements AnimationPhase {
     
     if (!this.remoteFetchPending) {
       this.scheduleRemoteFetch(true)
+      if (!this.remoteState.length) {
+        this.reportSource('local')
+      }
     }
   }
 
@@ -210,6 +218,8 @@ export class ExplosionPhase implements AnimationPhase {
       particle.color = sample.color ?? particle.color
       particle.life = 1 - this.progress
     }
+    
+    this.reportSource('server')
   }
 
   private interpolateRemoteState(
@@ -270,6 +280,7 @@ export class ExplosionPhase implements AnimationPhase {
         this.remoteEnabled = false
         this.remoteState = []
         this.remoteTargetState = null
+        this.reportSource('local')
       }
       throw error
     }
@@ -297,6 +308,10 @@ export class ExplosionPhase implements AnimationPhase {
 
   private now(): number {
     return typeof performance !== 'undefined' ? performance.now() : Date.now()
+  }
+  
+  private reportSource(mode: 'server' | 'local'): void {
+    this.sourceTracker.update(this.name, mode)
   }
   
   render(ctx: CanvasRenderingContext2D): void {

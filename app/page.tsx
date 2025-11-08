@@ -14,6 +14,7 @@ import { AdaptiveQualityScaler } from '@/lib/performance/adaptive-quality'
 import { MemoryManager, MemoryStats, MemoryEvent, MemorySample } from '@/lib/performance/memory-manager'
 import { PhaseType, DeviceTier, AnimationPhase } from '@/lib/types'
 import { TechStackDisplay } from './components/TechStack'
+import { SimulationSourceTracker, SimulationSourceStatus } from '@/lib/telemetry/simulation-source'
 
 export default function Error404() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -33,6 +34,7 @@ export default function Error404() {
   const monitorRef = useRef<PerformanceMonitor | null>(null)
   const qualityScalerRef = useRef<AdaptiveQualityScaler | null>(null)
   const memoryManagerRef = useRef<MemoryManager | null>(null)
+  const [simulationSources, setSimulationSources] = useState<Record<PhaseType, SimulationSourceStatus>>({})
   
   useEffect(() => {
     const canvas = canvasRef.current
@@ -220,6 +222,14 @@ export default function Error404() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  useEffect(() => {
+    const tracker = SimulationSourceTracker.getInstance()
+    const unsubscribe = tracker.subscribe((snapshot) => {
+      setSimulationSources(snapshot)
+    })
+    return unsubscribe
+  }, [])
+
   const handleToggleMemoryDebug = () => {
     const next = !showMemoryDebug
     setShowMemoryDebug(next)
@@ -236,6 +246,9 @@ export default function Error404() {
         .map((sample) => Math.round(sample.usedMB))
         .join(' → ')
     : ''
+  const currentSourceMode = simulationSources[currentPhase]?.mode ?? 'local'
+  const currentSourceLabel =
+    currentSourceMode === 'server' ? 'SERVER (staging GPU)' : 'LOCAL (browser)'
 
   return (
     <div className="relative w-screen h-screen overflow-hidden bg-black">
@@ -253,6 +266,7 @@ export default function Error404() {
         <div>Score: {performanceScore}%</div>
         <div>Memory: {memoryUsage}MB</div>
         <div>Thermal: {thermalState}</div>
+        <div>Physics: {currentSourceLabel}</div>
       </div>
 
       <button
@@ -301,4 +315,3 @@ export default function Error404() {
     </div>
   )
 }
-

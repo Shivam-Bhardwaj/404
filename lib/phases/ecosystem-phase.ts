@@ -4,6 +4,7 @@ import { AnimationPhase, Organism } from '../types'
 import { BoidsSystem } from '../biology/boids'
 import { COLORS } from '../constants'
 import { lerp } from '../utils/math'
+import { SimulationSourceTracker } from '../telemetry/simulation-source'
 
 interface RemoteBoidState {
   x: number
@@ -34,6 +35,7 @@ export class EcosystemPhase implements AnimationPhase {
   private remoteFailures = 0
   private readonly remoteBlendDuration = 300
   private readonly remoteBoidCount = 180
+  private sourceTracker = SimulationSourceTracker.getInstance()
   
   constructor(width: number, height: number) {
     this.boids = new BoidsSystem(width, height)
@@ -101,6 +103,7 @@ export class EcosystemPhase implements AnimationPhase {
   }
 
   private updateLocalBoids(dt: number): void {
+    this.reportSource('local')
     this.boids.update(dt)
     
     const stats = this.boids.getPopulationStats()
@@ -140,6 +143,7 @@ export class EcosystemPhase implements AnimationPhase {
 
   private updateRemoteBoids(dt: number): void {
     if (this.remoteTargetState && this.remoteState.length > 0) {
+      this.reportSource('server')
       this.remoteProgress = Math.min(
         1,
         this.remoteProgress + dt / this.remoteBlendDuration
@@ -161,6 +165,7 @@ export class EcosystemPhase implements AnimationPhase {
     }
     
     if (this.remoteState.length > 0) {
+      this.reportSource('server')
       this.applyRemoteBoidSamples(this.remoteState)
       const now = this.now()
       if (!this.remoteFetchPending && now - this.remoteLastSample > this.remoteBlendDuration) {
@@ -171,6 +176,9 @@ export class EcosystemPhase implements AnimationPhase {
     
     if (!this.remoteFetchPending) {
       this.scheduleRemoteBoidFetch(true)
+      if (!this.remoteState.length) {
+        this.reportSource('local')
+      }
     }
   }
 
@@ -204,6 +212,7 @@ export class EcosystemPhase implements AnimationPhase {
     }
     
     this.renderOrganisms = this.remoteOrganisms
+    this.reportSource('server')
   }
 
   private ensureRemoteOrganismPool(count: number): void {
@@ -322,6 +331,7 @@ export class EcosystemPhase implements AnimationPhase {
         this.remoteEnabled = false
         this.remoteState = []
         this.remoteTargetState = null
+        this.reportSource('local')
       }
       throw error
     }
@@ -374,6 +384,10 @@ export class EcosystemPhase implements AnimationPhase {
 
   private now(): number {
     return typeof performance !== 'undefined' ? performance.now() : Date.now()
+  }
+  
+  private reportSource(mode: 'server' | 'local'): void {
+    this.sourceTracker.update(this.name, mode)
   }
   
   render(ctx: CanvasRenderingContext2D): void {
