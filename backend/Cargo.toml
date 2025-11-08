@@ -28,6 +28,9 @@ config = "0.14"
 # Randomness for simulation seeds
 rand = "0.8"
 
+[build-dependencies]
+which = "4"
+
 [features]
 default = []
 cuda-kernel = ["nvrtc"]
