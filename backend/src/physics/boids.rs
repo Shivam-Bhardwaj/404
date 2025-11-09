@@ -22,6 +22,60 @@ pub struct Boid {
 
 unsafe impl DeviceCopy for Boid {}
 
+struct HostBuffers {
+    boids: Vec<Boid>,
+    x: Vec<f32>,
+    y: Vec<f32>,
+    vx: Vec<f32>,
+    vy: Vec<f32>,
+    species: Vec<u8>,
+}
+
+impl HostBuffers {
+    fn new(count: usize) -> Self {
+        Self {
+            boids: vec![Boid::default(); count],
+            x: vec![0.0; count],
+            y: vec![0.0; count],
+            vx: vec![0.0; count],
+            vy: vec![0.0; count],
+            species: vec![0; count],
+        }
+    }
+
+    fn len(&self) -> usize {
+        self.boids.len()
+    }
+
+    fn copy_from_slice(&mut self, boids: &[Boid]) {
+        debug_assert_eq!(self.len(), boids.len());
+        self.boids.copy_from_slice(boids);
+        self.sync_scalars_from_boids();
+    }
+
+    fn sync_scalars_from_boids(&mut self) {
+        for (idx, boid) in self.boids.iter().enumerate() {
+            self.x[idx] = boid.x;
+            self.y[idx] = boid.y;
+            self.vx[idx] = boid.vx;
+            self.vy[idx] = boid.vy;
+            self.species[idx] = boid.species;
+        }
+    }
+
+    fn rebuild_boids_from_scalars(&mut self) {
+        for i in 0..self.boids.len() {
+            self.boids[i] = Boid {
+                x: self.x[i],
+                y: self.y[i],
+                vx: self.vx[i],
+                vy: self.vy[i],
+                species: self.species[i],
+            };
+        }
+    }
+}
+
 pub struct BoidsSimulation {
     context: Arc<CudaContext>,
     num_boids: usize,
@@ -34,6 +88,7 @@ pub struct BoidsSimulation {
     d_species: Option<DeviceBuffer<u8>>,
     ptx: Option<String>,
     soa_dirty: bool,
+    aos_dirty: bool,
     last_used_cuda: bool,
     // Boids parameters
     separation_radius: f32,
@@ -41,12 +96,13 @@ pub struct BoidsSimulation {
     cohesion_radius: f32,
     max_speed: f32,
     max_force: f32,
+    host_buffers: HostBuffers,
 }
 
 impl BoidsSimulation {
     pub fn new(context: &Arc<CudaContext>, num_boids: usize) -> Result<Self> {
         // Context should already be initialized by caller
-        
+
         // Initialize boids randomly
         let mut host_boids = Vec::new();
         let mut rng = rand::thread_rng();
@@ -59,9 +115,11 @@ impl BoidsSimulation {
                 species: rng.gen_range(0..=3),
             });
         }
-        
+
         let boids = DeviceBuffer::from_slice(&host_boids)
             .map_err(|e| anyhow::anyhow!("Failed to allocate boids: {:?}", e))?;
+        let mut host_buffers = HostBuffers::new(num_boids);
+        host_buffers.copy_from_slice(&host_boids);
         // Try to prepare CUDA kernel (PTX provided by build.rs via BOIDS_PTX)
         let mut d_x = None;
         let mut d_y = None;
@@ -74,27 +132,15 @@ impl BoidsSimulation {
         if let Some(ptx_path) = option_env!("BOIDS_PTX") {
             if let Ok(ptx) = std::fs::read_to_string(ptx_path) {
                 // Initialize SoA buffers with current values now; PTX will be used on-demand
-                let mut hx = vec![0.0f32; num_boids];
-                let mut hy = vec![0.0f32; num_boids];
-                let mut hvx = vec![0.0f32; num_boids];
-                let mut hvy = vec![0.0f32; num_boids];
-                let mut hs = vec![0u8; num_boids];
-                for (i, b) in host_boids.iter().enumerate() {
-                    hx[i] = b.x;
-                    hy[i] = b.y;
-                    hvx[i] = b.vx;
-                    hvy[i] = b.vy;
-                    hs[i] = b.species;
-                }
-                let dx = DeviceBuffer::from_slice(&hx)
+                let dx = DeviceBuffer::from_slice(&host_buffers.x)
                     .map_err(|e| anyhow::anyhow!("alloc d_x: {:?}", e))?;
-                let dy = DeviceBuffer::from_slice(&hy)
+                let dy = DeviceBuffer::from_slice(&host_buffers.y)
                     .map_err(|e| anyhow::anyhow!("alloc d_y: {:?}", e))?;
-                let dvx = DeviceBuffer::from_slice(&hvx)
+                let dvx = DeviceBuffer::from_slice(&host_buffers.vx)
                     .map_err(|e| anyhow::anyhow!("alloc d_vx: {:?}", e))?;
-                let dvy = DeviceBuffer::from_slice(&hvy)
+                let dvy = DeviceBuffer::from_slice(&host_buffers.vy)
                     .map_err(|e| anyhow::anyhow!("alloc d_vy: {:?}", e))?;
-                let dspec = DeviceBuffer::from_slice(&hs)
+                let dspec = DeviceBuffer::from_slice(&host_buffers.species)
                     .map_err(|e| anyhow::anyhow!("alloc d_species: {:?}", e))?;
                 d_x = Some(dx);
                 d_y = Some(dy);
@@ -117,12 +163,14 @@ impl BoidsSimulation {
             d_species,
             ptx: ptx_opt,
             soa_dirty,
+            aos_dirty: false,
             last_used_cuda: false,
             separation_radius: 0.05,
             alignment_radius: 0.1,
             cohesion_radius: 0.15,
             max_speed: 0.05,
             max_force: 0.01,
+            host_buffers,
         })
     }
 
@@ -131,41 +179,16 @@ impl BoidsSimulation {
     }
 
     pub fn step(&mut self, dt: f32) -> Result<()> {
-        if let (Some(ptx), Some(dx), Some(dy), Some(dvx), Some(dvy), Some(dspecies)) = (
-            self.ptx.as_ref(),
-            self.d_x.as_mut(),
-            self.d_y.as_mut(),
-            self.d_vx.as_mut(),
-            self.d_vy.as_mut(),
-            self.d_species.as_mut(),
-        ) {
+        if self.ptx.is_some() && self.has_soa() {
             if self.soa_dirty {
-                let mut host_boids = vec![Boid::default(); self.num_boids];
-                self.boids
-                    .copy_to(&mut host_boids[..])
-                    .map_err(|e| anyhow::anyhow!("Failed to copy boids: {:?}", e))?;
-                let mut hx = vec![0.0f32; self.num_boids];
-                let mut hy = vec![0.0f32; self.num_boids];
-                let mut hvx = vec![0.0f32; self.num_boids];
-                let mut hvy = vec![0.0f32; self.num_boids];
-                let mut hs = vec![0u8; self.num_boids];
-                for i in 0..self.num_boids {
-                    let b = host_boids[i];
-                    hx[i] = b.x;
-                    hy[i] = b.y;
-                    hvx[i] = b.vx;
-                    hvy[i] = b.vy;
-                    hs[i] = b.species;
-                }
-                dx.copy_from(&hx[..]).map_err(|e| anyhow::anyhow!("sync hx->dx: {:?}", e))?;
-                dy.copy_from(&hy[..]).map_err(|e| anyhow::anyhow!("sync hy->dy: {:?}", e))?;
-                dvx.copy_from(&hvx[..]).map_err(|e| anyhow::anyhow!("sync hvx->dvx: {:?}", e))?;
-                dvy.copy_from(&hvy[..]).map_err(|e| anyhow::anyhow!("sync hvy->dvy: {:?}", e))?;
-                dspecies
-                    .copy_from(&hs[..])
-                    .map_err(|e| anyhow::anyhow!("sync species: {:?}", e))?;
-                self.soa_dirty = false;
+                self.sync_soa_from_aos()?;
             }
+            let ptx = self.ptx.as_ref().unwrap();
+            let dx = self.d_x.as_mut().unwrap();
+            let dy = self.d_y.as_mut().unwrap();
+            let dvx = self.d_vx.as_mut().unwrap();
+            let dvy = self.d_vy.as_mut().unwrap();
+            let dspecies = self.d_species.as_mut().unwrap();
 
             let ptx_c = CString::new(ptx.as_str()).unwrap();
             let module = Module::load_from_string(&ptx_c)
@@ -178,7 +201,11 @@ impl BoidsSimulation {
 
             let n = self.num_boids as i32;
             let block = (128u32, 1u32, 1u32);
-            let grid = (((self.num_boids as u32) + block.0 - 1) / block.0, 1u32, 1u32);
+            let grid = (
+                ((self.num_boids as u32) + block.0 - 1) / block.0,
+                1u32,
+                1u32,
+            );
             unsafe {
                 launch!(
                     func<<<grid, block, 0, stream>>>(
@@ -206,41 +233,19 @@ impl BoidsSimulation {
                 .synchronize()
                 .map_err(|e| anyhow::anyhow!("boids_step sync failed: {:?}", e))?;
 
-            let mut hx = vec![0.0f32; self.num_boids];
-            let mut hy = vec![0.0f32; self.num_boids];
-            let mut hvx = vec![0.0f32; self.num_boids];
-            let mut hvy = vec![0.0f32; self.num_boids];
-            let mut hs = vec![0u8; self.num_boids];
-            dx.copy_to(&mut hx[..]).map_err(|e| anyhow::anyhow!("dx->hx: {:?}", e))?;
-            dy.copy_to(&mut hy[..]).map_err(|e| anyhow::anyhow!("dy->hy: {:?}", e))?;
-            dvx.copy_to(&mut hvx[..]).map_err(|e| anyhow::anyhow!("dvx->hvx: {:?}", e))?;
-            dvy.copy_to(&mut hvy[..]).map_err(|e| anyhow::anyhow!("dvy->hvy: {:?}", e))?;
-            dspecies
-                .copy_to(&mut hs[..])
-                .map_err(|e| anyhow::anyhow!("species copy: {:?}", e))?;
-            let mut host_boids = vec![Boid::default(); self.num_boids];
-            for i in 0..self.num_boids {
-                host_boids[i] = Boid {
-                    x: hx[i],
-                    y: hy[i],
-                    vx: hvx[i],
-                    vy: hvy[i],
-                    species: hs[i],
-                };
-            }
-            self.boids
-                .copy_from(&host_boids[..])
-                .map_err(|e| anyhow::anyhow!("copy back boids: {:?}", e))?;
+            self.aos_dirty = true;
             self.last_used_cuda = true;
             self.soa_dirty = false;
             return Ok(());
         }
 
         // CPU fallback
-        let mut host_boids = vec![Boid::default(); self.num_boids];
-        self.boids.copy_to(&mut host_boids[..])
+        self.ensure_aos_current()?;
+        let host_boids = &mut self.host_buffers.boids;
+        self.boids
+            .copy_to(&mut host_boids[..])
             .map_err(|e| anyhow::anyhow!("Failed to copy boids: {:?}", e))?;
-        
+
         // Boids algorithm: Separation, Alignment, Cohesion
         for i in 0..self.num_boids {
             let mut sep_x = 0.0;
@@ -252,18 +257,20 @@ impl BoidsSimulation {
             let mut sep_count = 0;
             let mut align_count = 0;
             let mut coh_count = 0;
-            
+
             let bi = &host_boids[i];
-            
+
             for j in 0..self.num_boids {
-                if i == j { continue; }
-                
+                if i == j {
+                    continue;
+                }
+
                 let bj = &host_boids[j];
                 let dx = bi.x - bj.x;
                 let dy = bi.y - bj.y;
                 let dist_sq = dx * dx + dy * dy;
                 let dist = dist_sq.sqrt();
-                
+
                 // Only consider same species (simplified)
                 if bi.species == bj.species {
                     // Separation
@@ -272,14 +279,14 @@ impl BoidsSimulation {
                         sep_y += dy / dist;
                         sep_count += 1;
                     }
-                    
+
                     // Alignment
                     if dist < self.alignment_radius {
                         align_x += bj.vx;
                         align_y += bj.vy;
                         align_count += 1;
                     }
-                    
+
                     // Cohesion
                     if dist < self.cohesion_radius {
                         coh_x += bj.x;
@@ -288,11 +295,11 @@ impl BoidsSimulation {
                     }
                 }
             }
-            
+
             // Calculate forces
             let mut fx = 0.0;
             let mut fy = 0.0;
-            
+
             // Separation force
             if sep_count > 0 {
                 let sep_mag = (sep_x * sep_x + sep_y * sep_y).sqrt();
@@ -301,7 +308,7 @@ impl BoidsSimulation {
                     fy += (sep_y / sep_mag) * self.max_force;
                 }
             }
-            
+
             // Alignment force
             if align_count > 0 {
                 let align_mag = (align_x * align_x + align_y * align_y).sqrt();
@@ -315,7 +322,7 @@ impl BoidsSimulation {
                     }
                 }
             }
-            
+
             // Cohesion force
             if coh_count > 0 {
                 let avg_x = coh_x / coh_count as f32;
@@ -328,50 +335,141 @@ impl BoidsSimulation {
                     fy += (target_y / target_mag) * self.max_force * 0.3;
                 }
             }
-            
+
             // Update velocity
             host_boids[i].vx += fx * dt;
             host_boids[i].vy += fy * dt;
-            
+
             // Limit speed
-            let speed = (host_boids[i].vx * host_boids[i].vx + host_boids[i].vy * host_boids[i].vy).sqrt();
+            let speed =
+                (host_boids[i].vx * host_boids[i].vx + host_boids[i].vy * host_boids[i].vy).sqrt();
             if speed > self.max_speed {
                 host_boids[i].vx = (host_boids[i].vx / speed) * self.max_speed;
                 host_boids[i].vy = (host_boids[i].vy / speed) * self.max_speed;
             }
-            
+
             // Update position
             host_boids[i].x += host_boids[i].vx * dt;
             host_boids[i].y += host_boids[i].vy * dt;
-            
+
             // Wrap around boundaries
-            if host_boids[i].x < 0.0 { host_boids[i].x += 1.0; }
-            if host_boids[i].x > 1.0 { host_boids[i].x -= 1.0; }
-            if host_boids[i].y < 0.0 { host_boids[i].y += 1.0; }
-            if host_boids[i].y > 1.0 { host_boids[i].y -= 1.0; }
+            if host_boids[i].x < 0.0 {
+                host_boids[i].x += 1.0;
+            }
+            if host_boids[i].x > 1.0 {
+                host_boids[i].x -= 1.0;
+            }
+            if host_boids[i].y < 0.0 {
+                host_boids[i].y += 1.0;
+            }
+            if host_boids[i].y > 1.0 {
+                host_boids[i].y -= 1.0;
+            }
         }
-        
+
         // Copy back to device
-        self.boids.copy_from(&host_boids[..])
+        self.boids
+            .copy_from(&host_boids[..])
             .map_err(|e| anyhow::anyhow!("Failed to copy boids back: {:?}", e))?;
         self.last_used_cuda = false;
         self.soa_dirty = true;
+        self.aos_dirty = false;
         Ok(())
     }
 
-    pub fn get_boids(&self) -> Result<Vec<f32>> {
-        let mut host_boids = vec![Boid::default(); self.num_boids];
-        self.boids.copy_to(&mut host_boids[..])
+    fn has_soa(&self) -> bool {
+        self.d_x.is_some()
+            && self.d_y.is_some()
+            && self.d_vx.is_some()
+            && self.d_vy.is_some()
+            && self.d_species.is_some()
+    }
+
+    fn sync_soa_from_aos(&mut self) -> Result<()> {
+        if !self.has_soa() {
+            self.soa_dirty = false;
+            return Ok(());
+        }
+        self.boids
+            .copy_to(&mut self.host_buffers.boids[..])
+            .map_err(|e| anyhow::anyhow!("Failed to stage boids for SoA sync: {:?}", e))?;
+        self.host_buffers.sync_scalars_from_boids();
+        if let (Some(dx), Some(dy), Some(dvx), Some(dvy), Some(dspecies)) = (
+            self.d_x.as_mut(),
+            self.d_y.as_mut(),
+            self.d_vx.as_mut(),
+            self.d_vy.as_mut(),
+            self.d_species.as_mut(),
+        ) {
+            dx.copy_from(&self.host_buffers.x[..])
+                .map_err(|e| anyhow::anyhow!("sync hx->dx: {:?}", e))?;
+            dy.copy_from(&self.host_buffers.y[..])
+                .map_err(|e| anyhow::anyhow!("sync hy->dy: {:?}", e))?;
+            dvx.copy_from(&self.host_buffers.vx[..])
+                .map_err(|e| anyhow::anyhow!("sync hvx->dvx: {:?}", e))?;
+            dvy.copy_from(&self.host_buffers.vy[..])
+                .map_err(|e| anyhow::anyhow!("sync hvy->dvy: {:?}", e))?;
+            dspecies
+                .copy_from(&self.host_buffers.species[..])
+                .map_err(|e| anyhow::anyhow!("sync species: {:?}", e))?;
+        }
+        self.soa_dirty = false;
+        Ok(())
+    }
+
+    fn sync_aos_from_soa(&mut self) -> Result<()> {
+        if !self.has_soa() {
+            self.aos_dirty = false;
+            return Ok(());
+        }
+        if let (Some(dx), Some(dy), Some(dvx), Some(dvy), Some(dspecies)) = (
+            self.d_x.as_ref(),
+            self.d_y.as_ref(),
+            self.d_vx.as_ref(),
+            self.d_vy.as_ref(),
+            self.d_species.as_ref(),
+        ) {
+            dx.copy_to(&mut self.host_buffers.x[..])
+                .map_err(|e| anyhow::anyhow!("dx->host: {:?}", e))?;
+            dy.copy_to(&mut self.host_buffers.y[..])
+                .map_err(|e| anyhow::anyhow!("dy->host: {:?}", e))?;
+            dvx.copy_to(&mut self.host_buffers.vx[..])
+                .map_err(|e| anyhow::anyhow!("dvx->host: {:?}", e))?;
+            dvy.copy_to(&mut self.host_buffers.vy[..])
+                .map_err(|e| anyhow::anyhow!("dvy->host: {:?}", e))?;
+            dspecies
+                .copy_to(&mut self.host_buffers.species[..])
+                .map_err(|e| anyhow::anyhow!("species->host: {:?}", e))?;
+        }
+        self.host_buffers.rebuild_boids_from_scalars();
+        self.boids
+            .copy_from(&self.host_buffers.boids[..])
+            .map_err(|e| anyhow::anyhow!("copy SoA boids back: {:?}", e))?;
+        self.aos_dirty = false;
+        Ok(())
+    }
+
+    fn ensure_aos_current(&mut self) -> Result<()> {
+        if self.aos_dirty {
+            self.sync_aos_from_soa()?;
+        }
+        Ok(())
+    }
+
+    pub fn get_boids(&mut self) -> Result<Vec<f32>> {
+        self.ensure_aos_current()?;
+        let host_boids = &mut self.host_buffers.boids;
+        self.boids
+            .copy_to(&mut host_boids[..])
             .map_err(|e| anyhow::anyhow!("Failed to copy boids: {:?}", e))?;
-        
         let mut result = Vec::with_capacity(self.num_boids * 4);
-        for b in host_boids {
+        for b in host_boids.iter() {
             result.push(b.x);
             result.push(b.y);
             result.push(b.vx);
             result.push(b.vy);
         }
-        
+
         Ok(result)
     }
 
@@ -390,10 +488,15 @@ mod tests {
     fn setup_test_context() -> (Arc<CudaContext>, rustacuda::context::Context) {
         init_cuda_in_thread().expect("Failed to init CUDA in test thread");
         let context_obj = rustacuda::prelude::Context::create_and_push(
-            rustacuda::prelude::ContextFlags::MAP_HOST | rustacuda::prelude::ContextFlags::SCHED_AUTO,
-            rustacuda::prelude::Device::get_device(0).expect("Failed to get device")
-        ).expect("Failed to create context");
-        (Arc::new(CudaContext::new().expect("Failed to create CUDA context")), context_obj)
+            rustacuda::prelude::ContextFlags::MAP_HOST
+                | rustacuda::prelude::ContextFlags::SCHED_AUTO,
+            rustacuda::prelude::Device::get_device(0).expect("Failed to get device"),
+        )
+        .expect("Failed to create context");
+        (
+            Arc::new(CudaContext::new().expect("Failed to create CUDA context")),
+            context_obj,
+        )
     }
 
     #[test]
@@ -414,7 +517,7 @@ mod tests {
     #[test]
     fn test_boids_count() {
         let (context, _context_guard) = setup_test_context();
-        let sim = BoidsSimulation::new(&context, 1000).unwrap();
+        let mut sim = BoidsSimulation::new(&context, 1000).unwrap();
         let boids = sim.get_boids().unwrap();
         assert_eq!(boids.len(), 1000 * 4, "Should return boid data");
     }

@@ -31,6 +31,7 @@ fn get_or_init_cache() -> Mutex<Option<StatsCache>> {
     STATS_CACHE
 }
 
+#[cfg(feature = "gpu-stats")]
 /// Initialize NVML if available
 fn init_nvml() -> Result<()> {
     unsafe {
@@ -43,6 +44,7 @@ fn init_nvml() -> Result<()> {
     }
 }
 
+#[cfg(feature = "gpu-stats")]
 /// Check if NVML is available
 fn nvml_available() -> bool {
     unsafe {
@@ -57,6 +59,13 @@ fn nvml_available() -> bool {
     }
 }
 
+#[cfg(not(feature = "gpu-stats"))]
+/// Check if NVML is available (always false when feature disabled)
+fn nvml_available() -> bool {
+    false
+}
+
+#[cfg(feature = "gpu-stats")]
 /// Get GPU stats using NVML
 fn get_gpu_stats_nvml() -> Result<GpuStats> {
     unsafe {
@@ -162,9 +171,41 @@ pub fn get_gpu_stats(device: Option<&Device>) -> Result<GpuStats> {
     }
 
     // Get fresh stats
-    let stats = if nvml_available() {
-        get_gpu_stats_nvml().unwrap_or_else(|_| {
-            // Fallback to CUDA if NVML fails
+    let stats = if cfg!(feature = "gpu-stats") && nvml_available() {
+        #[cfg(feature = "gpu-stats")]
+        {
+            get_gpu_stats_nvml().unwrap_or_else(|_| {
+                // Fallback to CUDA if NVML fails
+                if let Some(dev) = device {
+                    get_gpu_stats_cuda(dev).unwrap_or_else(|_| GpuStats {
+                        gpu_utilization: None,
+                        memory_utilization: None,
+                        memory_used_mb: None,
+                        memory_total_mb: None,
+                        temperature_c: None,
+                        timestamp: std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_millis() as u64,
+                    })
+                } else {
+                    GpuStats {
+                        gpu_utilization: None,
+                        memory_utilization: None,
+                        memory_used_mb: None,
+                        memory_total_mb: None,
+                        temperature_c: None,
+                        timestamp: std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_millis() as u64,
+                    }
+                }
+            })
+        }
+        #[cfg(not(feature = "gpu-stats"))]
+        {
+            // Feature disabled - use CUDA fallback
             if let Some(dev) = device {
                 get_gpu_stats_cuda(dev).unwrap_or_else(|_| GpuStats {
                     gpu_utilization: None,
@@ -190,7 +231,7 @@ pub fn get_gpu_stats(device: Option<&Device>) -> Result<GpuStats> {
                         .as_millis() as u64,
                 }
             }
-        })
+        }
     } else if let Some(dev) = device {
         get_gpu_stats_cuda(dev).unwrap_or_else(|_| GpuStats {
             gpu_utilization: None,

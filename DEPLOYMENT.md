@@ -75,18 +75,22 @@ sudo systemctl enable backup.timer
 sudo systemctl start backup.timer
 ```
 
-## GitHub Actions Setup
+## Manual Deployment
 
-Configure these secrets in GitHub repository settings:
+Deployments are done manually on the server. GitHub is used only for version control and issue tracking.
 
-### Required Secrets:
-- `STAGING_HOST`: Staging server hostname/IP
-- `STAGING_USER`: SSH username for staging
-- `STAGING_SSH_KEY`: SSH private key for staging
-- `PRODUCTION_HOST`: Production server hostname/IP
-- `PRODUCTION_USER`: SSH username for production
-- `PRODUCTION_SSH_KEY`: SSH private key for production
-- `SLACK_WEBHOOK_URL`: (Optional) Slack webhook for notifications
+To deploy changes:
+```bash
+# SSH to the server
+ssh user@staging.too.foo
+
+# Navigate to repo and pull latest
+cd /404-public/repo
+git pull origin staging  # or main for production
+
+# Rebuild and restart
+docker compose -f docker-compose.staging.yml up -d --build
+```
 
 ## Zero-Downtime Deployment
 

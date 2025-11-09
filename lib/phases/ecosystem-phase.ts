@@ -4,7 +4,7 @@ import { AnimationPhase, Organism } from '../types'
 import { BoidsSystem } from '../biology/boids'
 import { COLORS } from '../constants'
 import { lerp } from '../utils/math'
-import { SimulationSourceTracker } from '../telemetry/simulation-source'
+import { SimulationSourceTracker, SimulationSourceDetails } from '../telemetry/simulation-source'
 
 interface RemoteBoidState {
   x: number
@@ -102,7 +102,6 @@ export class EcosystemPhase implements AnimationPhase {
   }
 
   private updateLocalBoids(dt: number): void {
-    this.reportSource('local')
     this.boids.update(dt)
     
     const stats = this.boids.getPopulationStats()
@@ -138,11 +137,13 @@ export class EcosystemPhase implements AnimationPhase {
     }
     
     this.renderOrganisms = this.boids.organisms
+    this.reportSource('local', {
+      sampleSize: this.renderOrganisms.length,
+    })
   }
 
   private updateRemoteBoids(dt: number): void {
     if (this.remoteTargetState && this.remoteState.length > 0) {
-      this.reportSource('server')
       this.remoteProgress = Math.min(
         1,
         this.remoteProgress + dt / this.remoteBlendDuration
@@ -164,7 +165,6 @@ export class EcosystemPhase implements AnimationPhase {
     }
     
     if (this.remoteState.length > 0) {
-      this.reportSource('server')
       this.applyRemoteBoidSamples(this.remoteState)
       const now = this.now()
       if (!this.remoteFetchPending && now - this.remoteLastSample > this.remoteBlendDuration) {
@@ -176,7 +176,9 @@ export class EcosystemPhase implements AnimationPhase {
     if (!this.remoteFetchPending) {
       this.scheduleRemoteBoidFetch(true)
       if (!this.remoteState.length) {
-        this.reportSource('local')
+        this.reportSource('local', {
+          sampleSize: this.renderOrganisms.length,
+        })
       }
     }
   }
@@ -211,7 +213,9 @@ export class EcosystemPhase implements AnimationPhase {
     }
     
     this.renderOrganisms = this.remoteOrganisms
-    this.reportSource('server')
+    this.reportSource('server', {
+      sampleSize: samples.length,
+    })
   }
 
   private ensureRemoteOrganismPool(count: number): void {
@@ -304,17 +308,24 @@ export class EcosystemPhase implements AnimationPhase {
 
   private async fetchRemoteBoids(prime: boolean): Promise<void> {
     try {
+      const requestStarted = this.now()
       const run = await runBoidsSimulation({
         steps: prime ? 12 : 6,
         numParticles: this.remoteBoidCount,
       })
       const samples = this.transformRemoteBoids(run.data)
+      const networkLatency = this.now() - requestStarted
       if (!samples.length) {
         throw new Error('Empty boids payload')
       }
       // Report accelerator if present
       const accel = run.metadata?.accelerator as 'cpu' | 'cuda' | undefined
-      this.reportSource('server', accel)
+      this.reportSource('server', {
+        accelerator: accel,
+        latencyMs: run.metadata?.computation_time_ms,
+        roundTripMs: networkLatency,
+        sampleSize: run.metadata?.num_particles ?? samples.length,
+      })
       
       if (prime || this.remoteState.length === 0) {
         this.remoteState = samples
@@ -333,7 +344,9 @@ export class EcosystemPhase implements AnimationPhase {
         this.remoteEnabled = false
         this.remoteState = []
         this.remoteTargetState = null
-        this.reportSource('local')
+        this.reportSource('local', {
+          sampleSize: this.renderOrganisms.length,
+        })
       }
       throw error
     }
@@ -388,8 +401,8 @@ export class EcosystemPhase implements AnimationPhase {
     return typeof performance !== 'undefined' ? performance.now() : Date.now()
   }
   
-  private reportSource(mode: 'server' | 'local', accelerator?: 'cpu' | 'cuda'): void {
-    this.sourceTracker.update(this.name, mode, accelerator)
+  private reportSource(mode: 'server' | 'local', details?: SimulationSourceDetails): void {
+    this.sourceTracker.update(this.name, mode, details)
   }
   
   render(ctx: CanvasRenderingContext2D): void {
