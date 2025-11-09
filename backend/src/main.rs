@@ -12,6 +12,7 @@ use tracing::{info, Level};
 use tracing_subscriber;
 
 mod cuda;
+mod gpu_stats;
 mod physics;
 #[cfg(test)]
 mod tests;
@@ -58,6 +59,17 @@ async fn gpu_info(State(state): State<AppState>) -> Result<Json<serde_json::Valu
         "status": "ready",
         "cuda_context": true
     })))
+}
+
+async fn gpu_stats(State(state): State<AppState>) -> Result<Json<gpu_stats::GpuStats>, StatusCode> {
+    let device = state.cuda_context.device();
+    let stats = gpu_stats::get_gpu_stats(Some(device))
+        .map_err(|e| {
+            tracing::warn!("Failed to get GPU stats: {:?}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+    
+    Ok(Json(stats))
 }
 
 async fn simulate_sph(
@@ -230,6 +242,7 @@ async fn main() -> anyhow::Result<()> {
     let app = Router::new()
         .route("/health", get(health))
         .route("/api/gpu-info", get(gpu_info))
+        .route("/api/gpu-stats", get(gpu_stats))
         .route("/api/simulate/sph", post(simulate_sph))
         .route("/api/simulate/boids", post(simulate_boids))
         .route("/api/simulate/grayscott", post(simulate_grayscott))
@@ -240,6 +253,7 @@ async fn main() -> anyhow::Result<()> {
     info!("Endpoints:");
     info!("  GET  /health");
     info!("  GET  /api/gpu-info");
+    info!("  GET  /api/gpu-stats");
     info!("  POST /api/simulate/sph");
     info!("  POST /api/simulate/boids");
     info!("  POST /api/simulate/grayscott");
