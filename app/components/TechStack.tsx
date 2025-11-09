@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
-import { fetchGpuInfo } from '@/lib/api/physics'
+import { fetchGpuInfo, fetchGpuStats, GpuStats } from '@/lib/api/physics'
 import { PhaseType, DeviceTier } from '@/lib/types'
 import { SimulationSourceStatus } from '@/lib/telemetry/simulation-source'
 
@@ -48,6 +48,8 @@ interface TechStackDisplayProps {
 export function TechStackDisplay({ telemetry }: TechStackDisplayProps) {
   const [techStack, setTechStack] = useState<TechStackInfo | null>(null)
   const [loading, setLoading] = useState(true)
+  const [gpuStats, setGpuStats] = useState<GpuStats | null>(null)
+  const [gpuStatsError, setGpuStatsError] = useState<string | null>(null)
 
   useEffect(() => {
     async function loadTechStack() {
@@ -85,6 +87,34 @@ export function TechStackDisplay({ telemetry }: TechStackDisplayProps) {
     loadTechStack()
   }, [])
 
+  // Poll GPU stats every 1.5 seconds
+  useEffect(() => {
+    let intervalId: NodeJS.Timeout | null = null
+
+    async function updateGpuStats() {
+      try {
+        const stats = await fetchGpuStats()
+        setGpuStats(stats)
+        setGpuStatsError(null)
+      } catch (error) {
+        setGpuStatsError('GPU stats unavailable')
+        console.error('Failed to fetch GPU stats:', error)
+      }
+    }
+
+    // Initial fetch
+    updateGpuStats()
+
+    // Set up polling
+    intervalId = setInterval(updateGpuStats, 1500)
+
+    return () => {
+      if (intervalId) {
+        clearInterval(intervalId)
+      }
+    }
+  }, [])
+
   const runtimeStats = useMemo(
     () => [
       { label: 'FPS', value: `${Math.max(0, Math.round(telemetry.fps))}` },
@@ -119,6 +149,34 @@ export function TechStackDisplay({ telemetry }: TechStackDisplayProps) {
     const delta = Math.max(0, performance.now() - lastUpdated)
     if (delta < 1000) return `${Math.round(delta)}ms ago`
     return `${(delta / 1000).toFixed(1)}s ago`
+  }
+
+  const getGpuStatusColor = (utilization: number | null, temp: number | null): string => {
+    if (utilization === null && temp === null) return 'normal'
+    if (temp !== null && temp > 85) return 'critical'
+    if (temp !== null && temp > 75) return 'throttling'
+    if (utilization !== null && utilization > 95) return 'throttling'
+    return 'normal'
+  }
+
+  const formatGpuUtilization = (util: number | null): string => {
+    if (util === null) return 'N/A'
+    return `${util}%`
+  }
+
+  const formatMemory = (used: number | null, total: number | null): string => {
+    if (used === null || total === null) return 'N/A'
+    const usedMB = Math.round(used)
+    const totalMB = Math.round(total)
+    const percent = Math.round((usedMB / totalMB) * 100)
+    return `${usedMB}MB / ${totalMB}MB (${percent}%)`
+  }
+
+  const getProgressBarClass = (value: number | null, threshold: number = 80): string => {
+    if (value === null) return ''
+    if (value >= threshold * 1.2) return 'critical'
+    if (value >= threshold) return 'warning'
+    return ''
   }
 
   if (loading) {
@@ -295,6 +353,60 @@ export function TechStackDisplay({ telemetry }: TechStackDisplayProps) {
           margin-top: 4px;
         }
 
+        .progress-bar-container {
+          width: 100%;
+          height: 6px;
+          background: rgba(57, 255, 20, 0.1);
+          border-radius: 3px;
+          overflow: hidden;
+          margin-top: 4px;
+        }
+
+        .progress-bar {
+          height: 100%;
+          background: linear-gradient(90deg, #39ff14 0%, #4da6ff 100%);
+          transition: width 0.3s ease;
+        }
+
+        .progress-bar.warning {
+          background: linear-gradient(90deg, #ffb84d 0%, #ff6b6b 100%);
+        }
+
+        .progress-bar.critical {
+          background: linear-gradient(90deg, #ff6b6b 0%, #ff0000 100%);
+        }
+
+        .gpu-stat-row {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          margin-bottom: 8px;
+        }
+
+        .gpu-stat-label {
+          color: #888;
+          font-size: 11px;
+        }
+
+        .gpu-stat-value {
+          color: #39ff14;
+          font-size: 13px;
+          font-weight: bold;
+        }
+
+        .gpu-stat-value.na {
+          color: #666;
+          font-style: italic;
+        }
+
+        .gpu-stat-value.warning {
+          color: #ffb84d;
+        }
+
+        .gpu-stat-value.critical {
+          color: #ff6b6b;
+        }
+
         @keyframes pulse {
           0%, 100% { opacity: 1; }
           50% { opacity: 0.5; }
@@ -316,6 +428,78 @@ export function TechStackDisplay({ telemetry }: TechStackDisplayProps) {
           </span>
         </div>
       </div>
+
+      {gpuStats && (
+        <div className="tech-section">
+          <div className="tech-section-title">GPU Performance</div>
+          <div className="gpu-stat-row">
+            <span className="gpu-stat-label">GPU Utilization</span>
+            <span className={`gpu-stat-value ${gpuStats.gpu_utilization === null ? 'na' : ''}`}>
+              {formatGpuUtilization(gpuStats.gpu_utilization)}
+            </span>
+          </div>
+          {gpuStats.gpu_utilization !== null && (
+            <div className="progress-bar-container">
+              <div
+                className={`progress-bar ${getProgressBarClass(gpuStats.gpu_utilization, 80)}`}
+                style={{ width: `${gpuStats.gpu_utilization}%` }}
+              />
+            </div>
+          )}
+          <div className="gpu-stat-row">
+            <span className="gpu-stat-label">Memory Utilization</span>
+            <span className={`gpu-stat-value ${gpuStats.memory_utilization === null ? 'na' : ''}`}>
+              {formatGpuUtilization(gpuStats.memory_utilization)}
+            </span>
+          </div>
+          {gpuStats.memory_utilization !== null && (
+            <div className="progress-bar-container">
+              <div
+                className={`progress-bar ${getProgressBarClass(gpuStats.memory_utilization, 80)}`}
+                style={{ width: `${gpuStats.memory_utilization}%` }}
+              />
+            </div>
+          )}
+          <div className="gpu-stat-row">
+            <span className="gpu-stat-label">Memory</span>
+            <span className={`gpu-stat-value ${gpuStats.memory_used_mb === null ? 'na' : ''}`}>
+              {formatMemory(gpuStats.memory_used_mb, gpuStats.memory_total_mb)}
+            </span>
+          </div>
+          {gpuStats.memory_used_mb !== null && gpuStats.memory_total_mb !== null && (
+            <div className="progress-bar-container">
+              <div
+                className={`progress-bar ${getProgressBarClass(
+                  (gpuStats.memory_used_mb / gpuStats.memory_total_mb) * 100,
+                  85
+                )}`}
+                style={{ width: `${(gpuStats.memory_used_mb / gpuStats.memory_total_mb) * 100}%` }}
+              />
+            </div>
+          )}
+          {gpuStats.temperature_c !== null && (
+            <>
+              <div className="gpu-stat-row">
+                <span className="gpu-stat-label">Temperature</span>
+                <span className={`gpu-stat-value ${
+                  getGpuStatusColor(gpuStats.gpu_utilization, gpuStats.temperature_c) === 'critical'
+                    ? 'critical'
+                    : getGpuStatusColor(gpuStats.gpu_utilization, gpuStats.temperature_c) === 'throttling'
+                    ? 'warning'
+                    : ''
+                }`}>
+                  {gpuStats.temperature_c}°C
+                </span>
+              </div>
+            </>
+          )}
+          {gpuStatsError && (
+            <div className="tech-item" style={{ color: '#888', fontSize: '10px' }}>
+              {gpuStatsError}
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="tech-section">
         <div className="tech-section-title">Backend</div>
@@ -427,6 +611,11 @@ export function TechStackDisplay({ telemetry }: TechStackDisplayProps) {
               )}
               {typeof status.roundTripMs === 'number' && (
                 <span>{Math.round(status.roundTripMs)}ms RTT</span>
+              )}
+              {typeof status.latencyMs === 'number' && typeof status.roundTripMs === 'number' && (
+                <span>
+                  {Math.round(status.roundTripMs - status.latencyMs)}ms network
+                </span>
               )}
               {typeof status.sampleSize === 'number' && <span>{status.sampleSize} samples</span>}
             </div>

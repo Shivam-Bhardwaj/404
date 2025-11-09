@@ -22,6 +22,15 @@ export interface GpuInfo {
   cuda_context?: boolean
 }
 
+export interface GpuStats {
+  gpu_utilization: number | null
+  memory_utilization: number | null
+  memory_used_mb: number | null
+  memory_total_mb: number | null
+  temperature_c: number | null
+  timestamp: number
+}
+
 export interface SimulationRun {
   data: number[]
   metadata?: SimulationResponse['metadata']
@@ -72,6 +81,11 @@ const requestJson = async <T>(
 
 export const fetchGpuInfo = async (): Promise<GpuInfo> => {
   const data = await requestJson<GpuInfo>('/api/gpu-info')
+  return data
+}
+
+export const fetchGpuStats = async (): Promise<GpuStats> => {
+  const data = await requestJson<GpuStats>('/api/gpu-stats')
   return data
 }
 

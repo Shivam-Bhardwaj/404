@@ -27,6 +27,8 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 config = "0.14"
 # Randomness for simulation seeds
 rand = "0.8"
+# GPU monitoring via NVML
+nvidia-ml-sys = "5.0"
 
 [build-dependencies]
 which = "4"
