@@ -40,7 +40,6 @@ interface DashboardPreferences {
 }
 
 const STORAGE_KEY = 'telemetry-dashboard-preferences'
-const DEFAULT_POSITION = { x: 20, y: 20 }
 
 // Sparkline component for mini graphs
 function Sparkline({ data, width = 60, height = 20, color = '#39ff14' }: {
@@ -90,19 +89,33 @@ function getThermalColor(state: 'normal' | 'throttling' | 'critical'): string {
 }
 
 export function TelemetryDashboard({ performance, physics, debug }: TelemetryDashboardProps) {
-  const [preferences, setPreferences] = useState<DashboardPreferences>(() => {
+  const getDefaultPosition = () => {
     if (typeof window === 'undefined') {
-      return { collapsed: false, position: DEFAULT_POSITION, activeTab: 'performance', showDebug: false }
+      return { x: 400, y: 300 }
+    }
+    // Position at bottom-center
+    return { x: Math.max(0, (window.innerWidth - 600) / 2), y: Math.max(0, window.innerHeight - 380) }
+  }
+
+  const [preferences, setPreferences] = useState<DashboardPreferences>(() => {
+    const defaultPos = getDefaultPosition()
+    if (typeof window === 'undefined') {
+      return { collapsed: false, position: defaultPos, activeTab: 'performance', showDebug: false }
     }
     const stored = localStorage.getItem(STORAGE_KEY)
     if (stored) {
       try {
-        return { ...JSON.parse(stored), position: DEFAULT_POSITION }
+        const parsed = JSON.parse(stored)
+        // If no stored position, use new default bottom position
+        if (!parsed.position) {
+          return { ...parsed, position: defaultPos }
+        }
+        return parsed
       } catch {
-        return { collapsed: false, position: DEFAULT_POSITION, activeTab: 'performance', showDebug: false }
+        return { collapsed: false, position: defaultPos, activeTab: 'performance', showDebug: false }
       }
     }
-    return { collapsed: false, position: DEFAULT_POSITION, activeTab: 'performance', showDebug: false }
+    return { collapsed: false, position: defaultPos, activeTab: 'performance', showDebug: false }
   })
 
   const [techStack, setTechStack] = useState<{ gpu: string; status?: string; cudaReady: boolean } | null>(null)
@@ -172,8 +185,8 @@ export function TelemetryDashboard({ performance, physics, debug }: TelemetryDas
     if (!isDragging) return
 
     const handleMouseMove = (e: MouseEvent) => {
-      const maxX = window.innerWidth - (window.innerWidth < 640 ? 340 : 400)
-      const maxY = window.innerHeight - (window.innerHeight < 768 ? 250 : 300)
+      const maxX = window.innerWidth - (window.innerWidth < 640 ? 340 : 620)
+      const maxY = window.innerHeight - (window.innerHeight < 768 ? 250 : 350)
       setPreferences(prev => ({
         ...prev,
         position: {
@@ -259,9 +272,9 @@ export function TelemetryDashboard({ performance, physics, debug }: TelemetryDas
       style={{
         left: preferences.position.x,
         top: preferences.position.y,
-        width: '380px',
+        width: '600px',
         maxWidth: 'calc(100vw - 20px)',
-        maxHeight: 'calc(100vh - 20px)',
+        maxHeight: '350px',
         cursor: isDragging ? 'grabbing' : 'default',
       }}
       onMouseDown={handleMouseDown}
@@ -317,10 +330,10 @@ export function TelemetryDashboard({ performance, physics, debug }: TelemetryDas
       </div>
 
       {/* Tab Content */}
-      <div className="p-3 overflow-y-auto overflow-x-hidden" style={{ maxHeight: '450px' }}>
+      <div className="p-3 overflow-y-auto overflow-x-hidden" style={{ maxHeight: '250px' }}>
         {preferences.activeTab === 'performance' && (
-          <div className="space-y-3">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          <div className="space-y-2">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
               <div className="bg-green-500 bg-opacity-5 border border-green-500 border-opacity-20 rounded p-2">
                 <div className="text-[10px] text-gray-400 uppercase mb-1">FPS</div>
                 <div className="flex items-center gap-2">
@@ -349,7 +362,7 @@ export function TelemetryDashboard({ performance, physics, debug }: TelemetryDas
               )}
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
               <div className="bg-green-500 bg-opacity-5 border border-green-500 border-opacity-20 rounded p-2">
                 <div className="text-[10px] text-gray-400 uppercase mb-1">Thermal</div>
                 <div className={`text-sm font-bold ${getThermalColor(performance.thermalState)}`}>

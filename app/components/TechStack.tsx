@@ -74,7 +74,7 @@ export function TechStackDisplay() {
   }
 
   return (
-    <div className="fixed bottom-4 right-4 bg-black bg-opacity-70 border border-orange-500 rounded p-3 font-mono text-xs text-green-400 backdrop-blur-sm z-40">
+    <div className="fixed bottom-4 left-4 bg-black bg-opacity-70 border border-orange-500 rounded p-3 font-mono text-xs text-green-400 backdrop-blur-sm z-40">
       <div className="text-orange-400 font-bold mb-2 text-sm">⚡ TECH STACK</div>
       
       <div className="space-y-2 text-[10px]">

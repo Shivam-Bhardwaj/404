@@ -286,7 +286,7 @@ export default function Error404() {
       />
       
       {/* 404 Message */}
-      <div className="absolute bottom-4 left-4 text-red-500 font-mono text-sm opacity-50">
+      <div className="absolute top-4 left-4 text-red-500 font-mono text-sm opacity-70">
         ERROR 404: The page you seek has evolved beyond existence
       </div>
       
