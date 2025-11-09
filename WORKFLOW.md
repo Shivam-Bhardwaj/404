@@ -1,39 +1,152 @@
-# Agent + Developer Workflow
+# Development Workflow for 404 Project
 
-These steps apply to **every** change against this repository. They exist so that
-humans and LLM copilots follow the exact same routine whether the request comes
-from a GitHub Issue link, chat prompt, or terminal note.
+## When You Paste a New Issue
 
-## 1. Start From a Worktree Per Issue
+This is the standard workflow for handling GitHub issues:
 
-1. Copy the GitHub Issue URL.
-2. Create a dedicated worktree rooted at the repository’s parent folder if one
-   does not already exist. Use a descriptive name such as
-   `git worktree add ../404-issue-123 staging`.
-3. Check out or create the issue branch **inside that worktree** and do all
-   editing/testing there. Never work directly inside `/404-public/repo`.
+### 1. Create Worktree
 
-## 2. Implement and Test Locally
+When you share a GitHub issue URL (e.g., `https://github.com/Shivam-Bhardwaj/404/issues/5`):
 
-Run the standard suite before pushing:
+```bash
+# Extract issue number (e.g., 5)
+ISSUE_NUM=5
 
-- Frontend: `npm run lint`, `npm run test`, `npm run build`.
-- Backend (when touched): `cargo fmt`, `cargo clippy --all-targets --all-features`,
-  `cargo test --all`, `./test-backend-api.sh`.
-- Feature-specific scripts (Keploy, GPU tests, etc.) when applicable.
+# Create worktree with feature branch
+cd /404-public/repo
+git worktree add ../404-issue-${ISSUE_NUM} -b issue-${ISSUE_NUM}
+cd ../404-issue-${ISSUE_NUM}
+```
 
-Document any screenshots, curl logs, or benchmark results the issue asks for.
+### 2. Implement Changes
 
-## 3. Push and Open a PR
+Work on the issue in the worktree:
+- Make code changes
+- Test locally
+- Commit changes
 
-1. Commit using the repository’s task/issue naming conventions.
-2. Push the branch from the worktree.
-3. Open a PR targeting `staging`, include the issue link (“Closes #123”), and
-   paste the local test commands/output along with any required evidence.
-4. Wait for the staging GitHub Action to redeploy, then verify at
-   `https://staging.too.foo`.
+```bash
+git add -A
+git commit -m "feat/fix: Brief description
 
-Following this checklist means that any LLM—or person—who receives only the
-issue URL knows to prepare a worktree, perform local validation, push a branch,
-and produce a reviewable PR. Put differently: **issue link ⇒ worktree ⇒ local
-tests ⇒ PR ⇒ staging verification**.
+Fixes #${ISSUE_NUM}"
+```
+
+### 3. Push to Staging Branch
+
+```bash
+# Push feature branch
+git push origin issue-${ISSUE_NUM}
+
+# Or merge to staging for deployment
+git checkout staging
+git merge issue-${ISSUE_NUM}
+git push origin staging
+```
+
+### 4. Deploy to Staging (Manual)
+
+Since this machine IS the staging server:
+
+**Frontend (Docker):**
+```bash
+cd /404-public/repo
+git checkout staging
+git pull origin staging
+docker compose -f docker-compose.staging.yml up -d --build
+```
+
+**Backend (PM2):**
+```bash
+cd /404-public/repo/backend
+cargo build --release
+pm2 restart 404-backend
+# or if new backend:
+pm2 stop 404-backend && pm2 delete 404-backend
+pm2 start target/release/physics-backend --name 404-backend
+pm2 save
+```
+
+### 5. Review on Staging
+
+You review changes in browser at: **https://staging.too.foo/**
+
+If changes look good → proceed to merge
+If changes need work → make more commits and redeploy
+
+### 6. Merge to Main (When Approved)
+
+```bash
+cd /404-public/repo
+git checkout main
+git pull origin main
+git merge staging -m "Merge staging: [description]"
+git push origin main
+```
+
+### 7. Cleanup Worktree (Optional)
+
+```bash
+cd /404-public/repo
+git worktree remove ../404-issue-${ISSUE_NUM}
+git branch -d issue-${ISSUE_NUM}
+git push origin --delete issue-${ISSUE_NUM}
+```
+
+## Key Principles
+
+### GitHub Usage
+- **Version Control**: Store code history
+- **Issue Tracking**: Track bugs/features, share screenshots
+- **NO GitHub Actions**: All CI/CD removed - test locally, deploy manually
+
+### Testing
+- **Local first**: All development and testing done on this machine
+- **Staging review**: Final check on https://staging.too.foo/ before production
+- **No automated tests in CI**: Manual testing only
+
+### Deployment
+- **Manual deployments**: All deployments done by running commands on this server
+- **Staging environment**: Same machine, different Docker container + PM2 process
+- **No secrets needed**: Everything runs locally
+
+## Directory Structure
+
+```
+/404-public/
+├── repo/                    # Main repository (staging & main branches)
+├── 404-issue-X/            # Worktrees for each issue
+├── 404-issue-Y/
+└── ...
+```
+
+## Common Commands
+
+### Check what's running
+```bash
+docker ps                    # Frontend containers
+pm2 list                     # Backend processes
+```
+
+### View logs
+```bash
+docker logs 404-app-staging  # Frontend logs
+pm2 logs 404-backend         # Backend logs
+```
+
+### Restart services
+```bash
+# Frontend
+docker compose -f docker-compose.staging.yml restart
+
+# Backend
+pm2 restart 404-backend
+```
+
+## Notes
+
+- This machine is the staging server
+- No CI/CD pipelines - everything is manual
+- Review on staging before merging to main
+- Worktrees keep issues isolated
+
