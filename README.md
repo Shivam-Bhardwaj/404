@@ -54,6 +54,22 @@ npm run build
 npm run start
 ```
 
+## Deployment
+
+- **Production (`https://too.foo`)** now lives on a separate Vercel project (different repository); this repo no longer pushes there, so don’t run `vercel deploy` from this workspace.
+- **Staging (`https://staging.too.foo`)** is served from the on-prem Docker/Traefik stack defined in the `docker-compose.*` files and deployed via the GitHub Actions workflow (`.github/workflows/deploy.yml`) or the manual commands in `DEPLOYMENT.md`.
+- Treat this repository as “staging-only”: validate locally, merge to `staging`, let the self-hosted pipeline redeploy, and verify at `staging.too.foo` before coordinating any changes with the separate production site.
+
+## Agent / Worktree Workflow
+
+Whenever you (or an LLM) start working on an issue:
+
+1. Create or reuse a dedicated git worktree for that issue (never edit directly in `/404-public/repo`).
+2. Implement and run the required local tests inside that worktree.
+3. Push the branch, open a PR targeting `staging`, and wait for the staging deployment before handing it off.
+
+See [`WORKFLOW.md`](./WORKFLOW.md) for the full checklist.
+
 ## Project Structure
 
 ```

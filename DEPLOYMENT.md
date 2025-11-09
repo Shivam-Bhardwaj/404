@@ -1,5 +1,7 @@
 # Deployment Guide for too.foo
 
+> **Scope:** This document covers the self-hosted staging environment (`staging.too.foo`). The production domain (`too.foo`) is now running on a separate Vercel project and is managed outside of this repository.
+
 ## Initial Setup
 
 ### 1. Start Traefik
@@ -101,4 +103,3 @@ docker inspect --format='{{.State.Health.Status}}' 404-app-green
 # Stop old container
 docker compose stop app-blue
 ```
-
