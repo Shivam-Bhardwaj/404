@@ -27,10 +27,6 @@ static STATS_CACHE: Mutex<Option<StatsCache>> = Mutex::new(None);
 
 const CACHE_DURATION_MS: u64 = 500; // Cache for 500ms
 
-fn get_or_init_cache() -> Mutex<Option<StatsCache>> {
-    STATS_CACHE
-}
-
 #[cfg(feature = "gpu-stats")]
 /// Initialize NVML if available
 fn init_nvml() -> Result<()> {
@@ -142,7 +138,7 @@ fn get_gpu_stats_cuda(device: &Device) -> Result<GpuStats> {
     
     // Try to get free memory (this might not be accurate)
     // CUDA runtime doesn't expose free memory directly, so we'll estimate
-    let mem_total_mb = mem_info / (1024 * 1024);
+    let mem_total_mb = (mem_info / (1024 * 1024)) as u64;
     
     Ok(GpuStats {
         gpu_utilization: None,
@@ -159,7 +155,7 @@ fn get_gpu_stats_cuda(device: &Device) -> Result<GpuStats> {
 
 /// Get GPU stats with caching
 pub fn get_gpu_stats(device: Option<&Device>) -> Result<GpuStats> {
-    let mut cache_guard = get_or_init_cache().lock().unwrap();
+    let mut cache_guard = STATS_CACHE.lock().unwrap();
     
     // Check cache
     if let Some(ref cache) = *cache_guard {
