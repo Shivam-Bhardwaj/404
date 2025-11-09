@@ -43,16 +43,33 @@ export function SimulationSourcePanel() {
         ? ((performance.now() - status.lastUpdated) / 1000).toFixed(1)
         : null
 
+    const metricsParts: string[] = []
+    if (typeof status?.latencyMs === 'number') {
+      metricsParts.push(`${Math.round(status.latencyMs)}ms compute`)
+    }
+    if (typeof status?.roundTripMs === 'number') {
+      metricsParts.push(`${Math.round(status.roundTripMs)}ms RTT`)
+    }
+    if (typeof status?.sampleSize === 'number') {
+      metricsParts.push(`${status.sampleSize} samples`)
+    }
+    const metricsText = metricsParts.join(' · ')
+
     return (
       <div
         key={phase}
-        className={`flex items-center justify-between text-xs font-mono border px-2 py-1 rounded ${colors[mode]}`}
+        className={`text-xs font-mono border px-2 py-1 rounded ${colors[mode]}`}
       >
-        <span className="uppercase tracking-wide">{phase}</span>
-        <span className="text-right">
-          {labels[mode]}{accel ? ` · ${accel.toUpperCase()}` : ''}
-          {since && <span className="block text-[10px] text-gray-400">updated {since}s ago</span>}
-        </span>
+        <div className="flex items-center justify-between">
+          <span className="uppercase tracking-wide">{phase}</span>
+          <span className="text-right">
+            {labels[mode]}{accel ? ` · ${accel.toUpperCase()}` : ''}
+            {since && <span className="block text-[10px] text-gray-400">updated {since}s ago</span>}
+          </span>
+        </div>
+        {metricsText && (
+          <div className="text-right text-[10px] text-gray-300 mt-1">{metricsText}</div>
+        )}
       </div>
     )
   }

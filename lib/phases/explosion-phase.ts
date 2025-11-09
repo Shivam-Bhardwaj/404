@@ -1,5 +1,5 @@
 // Particle Explosion with SPH Physics
-import { fetchSphSimulation } from '@/lib/api/physics'
+import { runSphSimulation } from '@/lib/api/physics'
 import { AnimationPhase } from '../types'
 import { SPHSimulation } from '../physics/sph'
 import { COLORS } from '../constants'
@@ -7,7 +7,7 @@ import { randomRange, curlNoise, lerp } from '../utils/math'
 import { WebGLRenderer } from '../rendering/webgl-renderer'
 import { GPUParticleRenderer } from '../rendering/particle-gpu-renderer'
 import { SharedWebGLContext } from '../rendering/shared-webgl-context'
-import { SimulationSourceTracker } from '../telemetry/simulation-source'
+import { SimulationSourceTracker, SimulationSourceDetails } from '../telemetry/simulation-source'
 
 interface RemoteParticleState {
   x: number
@@ -133,7 +133,6 @@ export class ExplosionPhase implements AnimationPhase {
   }
 
   private updateLocalParticles(dt: number): void {
-    this.reportSource('local')
     for (const p of this.sph.particles) {
       const [cx, cy] = curlNoise(p.x * 0.01, p.y * 0.01, this.time)
       p.vx += cx * 0.5
@@ -142,11 +141,13 @@ export class ExplosionPhase implements AnimationPhase {
     }
     
     this.sph.update(dt * 0.016)
+    this.reportSource('local', {
+      sampleSize: this.sph.particles.length,
+    })
   }
 
   private updateRemoteParticles(dt: number): void {
     if (this.remoteTargetState && this.remoteState.length > 0) {
-      this.reportSource('server')
       this.remoteProgress = Math.min(
         1,
         this.remoteProgress + dt / this.remoteBlendDuration
@@ -168,7 +169,6 @@ export class ExplosionPhase implements AnimationPhase {
     }
     
     if (this.remoteState.length > 0) {
-      this.reportSource('server')
       this.applyRemoteSamples(this.remoteState)
       const now = this.now()
       if (!this.remoteFetchPending && now - this.remoteLastSample > this.remoteBlendDuration) {
@@ -180,7 +180,9 @@ export class ExplosionPhase implements AnimationPhase {
     if (!this.remoteFetchPending) {
       this.scheduleRemoteFetch(true)
       if (!this.remoteState.length) {
-        this.reportSource('local')
+        this.reportSource('local', {
+          sampleSize: this.sph.particles.length,
+        })
       }
     }
   }
@@ -205,6 +207,9 @@ export class ExplosionPhase implements AnimationPhase {
         pressure: 0,
         viscosity: 0.1,
       }))
+      this.reportSource('server', {
+        sampleSize: samples.length,
+      })
       return
     }
     
@@ -219,7 +224,9 @@ export class ExplosionPhase implements AnimationPhase {
       particle.life = 1 - this.progress
     }
     
-    this.reportSource('server')
+    this.reportSource('server', {
+      sampleSize: samples.length,
+    })
   }
 
   private interpolateRemoteState(
@@ -257,12 +264,20 @@ export class ExplosionPhase implements AnimationPhase {
 
   private async fetchRemoteState(prime: boolean): Promise<void> {
     try {
-      const data = await fetchSphSimulation({ steps: prime ? 12 : 6 })
-      const samples = this.transformRemoteParticles(data)
+      const requestStarted = this.now()
+      const run = await runSphSimulation({ steps: prime ? 12 : 6 })
+      const samples = this.transformRemoteParticles(run.data)
+      const networkLatency = this.now() - requestStarted
       if (!samples.length) {
         throw new Error('Empty SPH payload')
       }
-      
+      this.reportSource('server', {
+        accelerator: run.metadata?.accelerator as 'cpu' | 'cuda' | undefined,
+        latencyMs: run.metadata?.computation_time_ms,
+        roundTripMs: networkLatency,
+        sampleSize: run.metadata?.num_particles ?? samples.length,
+      })
+
       if (prime || this.remoteState.length === 0) {
         this.remoteState = samples
         this.applyRemoteSamples(samples)
@@ -280,7 +295,9 @@ export class ExplosionPhase implements AnimationPhase {
         this.remoteEnabled = false
         this.remoteState = []
         this.remoteTargetState = null
-        this.reportSource('local')
+        this.reportSource('local', {
+          sampleSize: this.sph.particles.length,
+        })
       }
       throw error
     }
@@ -310,8 +327,8 @@ export class ExplosionPhase implements AnimationPhase {
     return typeof performance !== 'undefined' ? performance.now() : Date.now()
   }
   
-  private reportSource(mode: 'server' | 'local', accelerator?: 'cpu' | 'cuda'): void {
-    this.sourceTracker.update(this.name, mode, accelerator)
+  private reportSource(mode: 'server' | 'local', details?: SimulationSourceDetails): void {
+    this.sourceTracker.update(this.name, mode, details)
   }
   
   render(ctx: CanvasRenderingContext2D): void {
