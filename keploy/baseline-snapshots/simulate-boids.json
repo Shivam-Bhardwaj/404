@@ -1,0 +1,14 @@
+{
+  "success": true,
+  "data": [
+    0.501, 0.742, 0.012, -0.026,
+    0.312, 0.118, -0.014, 0.007
+  ],
+  "metadata": {
+    "simulation_type": "boids",
+    "num_particles": 180,
+    "computation_time_ms": 42,
+    "accelerator": "cuda"
+  },
+  "error": null
+}

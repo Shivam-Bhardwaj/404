@@ -14,7 +14,7 @@ import { AdaptiveQualityScaler } from '@/lib/performance/adaptive-quality'
 import { MemoryManager, MemoryStats, MemoryEvent, MemorySample } from '@/lib/performance/memory-manager'
 import { PhaseType, DeviceTier, AnimationPhase } from '@/lib/types'
 import { TechStackDisplay } from './components/TechStack'
-import { SimulationSourcePanel } from './components/SimulationSourcePanel'
+import { TelemetryDashboard } from './components/TelemetryDashboard'
 import { SimulationSourceTracker, SimulationSourceStatus } from '@/lib/telemetry/simulation-source'
 
 export default function Error404() {
@@ -26,7 +26,6 @@ export default function Error404() {
   const [performanceScore, setPerformanceScore] = useState(0)
   const [memoryUsage, setMemoryUsage] = useState(0)
   const [thermalState, setThermalState] = useState<'normal' | 'throttling' | 'critical'>('normal')
-  const [showMemoryDebug, setShowMemoryDebug] = useState(false)
   const [memoryStatsData, setMemoryStatsData] = useState<MemoryStats | null>(null)
   const [memoryHistoryData, setMemoryHistoryData] = useState<MemorySample[]>([])
   const [memoryEvents, setMemoryEvents] = useState<MemoryEvent[]>([])
@@ -40,9 +39,6 @@ export default function Error404() {
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas) return
-    
-    const debugMemory = new URLSearchParams(window.location.search).get('debug') === 'memory'
-    setShowMemoryDebug(debugMemory)
     
     const ctx = canvas.getContext('2d')
     if (!ctx) return
@@ -231,16 +227,6 @@ export default function Error404() {
     return unsubscribe
   }, [])
 
-  const handleToggleMemoryDebug = () => {
-    const next = !showMemoryDebug
-    setShowMemoryDebug(next)
-    if (next && memoryManagerRef.current) {
-      const manager = memoryManagerRef.current
-      setMemoryStatsData(manager.getStats())
-      setMemoryHistoryData(manager.getHistory(60))
-    }
-  }
-
   const memoryTrend = memoryHistoryData.length
     ? memoryHistoryData
         .slice(-6)
@@ -264,20 +250,6 @@ export default function Error404() {
   }
   const currentTelemetryLine = telemetryParts.join(' / ')
 
-  const techTelemetry = {
-    fps,
-    currentPhase,
-    deviceTier,
-    loopCount,
-    performanceScore,
-    memoryUsage,
-    thermalState,
-    memoryTrend,
-    currentSourceLabel,
-    currentTelemetryLine,
-    simulationSources,
-  }
-
   return (
     <div className="relative w-screen h-screen overflow-hidden bg-black">
       <canvas
@@ -285,67 +257,41 @@ export default function Error404() {
         className="absolute inset-0 w-full h-full"
       />
       
-      {/* Performance Overlay */}
-      <div className="absolute top-4 right-4 text-green-400 font-mono text-xs bg-black bg-opacity-50 p-2 rounded">
-        <div>FPS: {fps}</div>
-        <div>Phase: {currentPhase}</div>
-        <div>Device: {deviceTier}</div>
-        <div>Loop: {loopCount}</div>
-        <div>Score: {performanceScore}%</div>
-        <div>Memory: {memoryUsage}MB</div>
-        <div>Thermal: {thermalState}</div>
-        <div>Physics: {currentSourceLabel}</div>
-        {currentTelemetryLine && (
-          <div>SimLatency: {currentTelemetryLine}</div>
-        )}
-      </div>
-      
-      {/* Physics Source Monitor */}
-      <SimulationSourcePanel />
-
-      <button
-        type="button"
-        onClick={handleToggleMemoryDebug}
-        className={`absolute bottom-4 right-4 px-3 py-1 border rounded text-xs font-mono uppercase tracking-wide transition-colors ${showMemoryDebug ? 'border-cyan-500 text-cyan-300' : 'border-gray-600 text-gray-300 hover:text-white hover:border-white'}`}
-      >
-        for_nerds {showMemoryDebug ? '▲' : '▼'}
-      </button>
-
-      {showMemoryDebug && memoryStatsData && (
-        <div className="absolute bottom-16 right-4 w-72 text-cyan-300 font-mono text-xs bg-black bg-opacity-70 backdrop-blur-sm p-3 rounded border border-cyan-500 border-opacity-30 space-y-1">
-          <div className="text-cyan-100 uppercase tracking-widest text-[10px]">Memory Debug</div>
-          <div className="flex justify-between"><span>Status</span><span>{memoryStatsData.status.toUpperCase()}</span></div>
-          <div className="flex justify-between"><span>Current</span><span>{memoryStatsData.currentUsage.toFixed(1)} MB</span></div>
-          <div className="flex justify-between"><span>Average</span><span>{memoryStatsData.averageUsage.toFixed(1)} MB</span></div>
-          <div className="flex justify-between"><span>Peak</span><span>{memoryStatsData.peakUsage.toFixed(1)} MB</span></div>
-          <div className="flex justify-between"><span>Warnings</span><span>{memoryStatsData.warningCount}</span></div>
-          <div className="flex justify-between"><span>Critical</span><span>{memoryStatsData.criticalCount}</span></div>
-          <div className="flex justify-between"><span>Cleanups</span><span>{memoryStatsData.cleanupCount}</span></div>
-          <div className="flex justify-between"><span>Leak</span><span>{memoryStatsData.leakSuspected ? '⚠ suspected' : 'clear'}</span></div>
-          {memoryTrend && (
-            <div className="pt-1 text-[10px] text-cyan-200">Recent: {memoryTrend} MB</div>
-          )}
-          {memoryEvents.length > 0 && (
-            <div className="pt-2 border-t border-cyan-700 border-opacity-40">
-              <div className="text-cyan-100 mb-1">Events</div>
-              {memoryEvents.slice(-3).reverse().map((event) => (
-                <div key={event.timestamp} className="flex justify-between text-[10px]">
-                  <span>{new Date(event.timestamp).toLocaleTimeString()}</span>
-                  <span>{event.type}@{event.usedMB.toFixed(1)}MB</span>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
+      {/* Unified Telemetry Dashboard */}
+      <TelemetryDashboard
+        performance={{
+          fps,
+          memoryUsage,
+          thermalState,
+          performanceScore,
+          deviceTier,
+          memoryTrend,
+        }}
+        physics={{
+          currentPhase,
+          loopCount,
+          currentSourceLabel,
+          currentTelemetryLine,
+          simulationSources,
+        }}
+        debug={{
+          memoryStats: memoryStatsData ?? undefined,
+          memoryHistory: memoryHistoryData,
+          memoryEvents: memoryEvents.map(e => ({
+            timestamp: e.timestamp,
+            type: e.type,
+            usedMB: e.usedMB,
+          })),
+        }}
+      />
       
       {/* 404 Message */}
       <div className="absolute bottom-4 left-4 text-red-500 font-mono text-sm opacity-50">
         ERROR 404: The page you seek has evolved beyond existence
       </div>
       
-      {/* Tech Stack Display */}
-      <TechStackDisplay telemetry={techTelemetry} />
+      {/* Tech Stack Display - Static Info Only */}
+      <TechStackDisplay />
     </div>
   )
 }
