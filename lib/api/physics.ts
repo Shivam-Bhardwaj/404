@@ -18,7 +18,8 @@ interface SimulationResponse {
 
 export interface GpuInfo {
   gpu: string
-  status: string
+  status?: string
+  cuda_context?: boolean
 }
 
 export interface SimulationRun {
@@ -98,9 +99,7 @@ const runSimulation = async (
 export const fetchSphSimulation = async (options?: {
   steps?: number
 }): Promise<number[]> => {
-  return runSimulation('sph', {
-    steps: options?.steps ?? 6,
-  })
+  return (await runSphSimulation(options)).data
 }
 
 export const fetchBoidsSimulation = async (options?: {
@@ -131,6 +130,20 @@ export const runBoidsSimulation = async (options?: {
       simulation_type: 'boids',
       steps: options?.steps ?? 6,
       num_particles: options?.numParticles ?? 180,
+    }),
+  })
+  if (!response.success || !response.data) throw new Error(response.error ?? 'No data')
+  return { data: response.data, metadata: response.metadata }
+}
+
+export const runSphSimulation = async (options?: {
+  steps?: number
+}): Promise<SimulationRun> => {
+  const response = await requestJson<SimulationResponse>(`/api/simulate/sph`, {
+    method: 'POST',
+    body: JSON.stringify({
+      simulation_type: 'sph',
+      steps: options?.steps ?? 6,
     }),
   })
   if (!response.success || !response.data) throw new Error(response.error ?? 'No data')

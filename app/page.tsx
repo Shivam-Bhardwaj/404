@@ -252,6 +252,31 @@ export default function Error404() {
     currentStatus?.mode === 'server'
       ? `SERVER${currentStatus.accelerator ? ` (${currentStatus.accelerator.toUpperCase()})` : ''}`
       : 'LOCAL (browser)'
+  const telemetryParts: string[] = []
+  if (typeof currentStatus?.latencyMs === 'number') {
+    telemetryParts.push(`${Math.round(currentStatus.latencyMs)}ms compute`)
+  }
+  if (typeof currentStatus?.roundTripMs === 'number') {
+    telemetryParts.push(`${Math.round(currentStatus.roundTripMs)}ms RTT`)
+  }
+  if (typeof currentStatus?.sampleSize === 'number') {
+    telemetryParts.push(`${currentStatus.sampleSize} samples`)
+  }
+  const currentTelemetryLine = telemetryParts.join(' / ')
+
+  const techTelemetry = {
+    fps,
+    currentPhase,
+    deviceTier,
+    loopCount,
+    performanceScore,
+    memoryUsage,
+    thermalState,
+    memoryTrend,
+    currentSourceLabel,
+    currentTelemetryLine,
+    simulationSources,
+  }
 
   return (
     <div className="relative w-screen h-screen overflow-hidden bg-black">
@@ -270,6 +295,9 @@ export default function Error404() {
         <div>Memory: {memoryUsage}MB</div>
         <div>Thermal: {thermalState}</div>
         <div>Physics: {currentSourceLabel}</div>
+        {currentTelemetryLine && (
+          <div>SimLatency: {currentTelemetryLine}</div>
+        )}
       </div>
       
       {/* Physics Source Monitor */}
@@ -317,7 +345,7 @@ export default function Error404() {
       </div>
       
       {/* Tech Stack Display */}
-      <TechStackDisplay />
+      <TechStackDisplay telemetry={techTelemetry} />
     </div>
   )
 }
