@@ -1,0 +1,14 @@
+{
+  "success": true,
+  "data": [
+    0.498, 0.503, 0.021, 0.013,
+    0.524, 0.511, -0.018, -0.007
+  ],
+  "metadata": {
+    "simulation_type": "sph",
+    "num_particles": 1000,
+    "computation_time_ms": 87,
+    "accelerator": "cpu"
+  },
+  "error": null
+}

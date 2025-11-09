@@ -7,6 +7,5 @@ services:
     network_mode: host
     volumes:
       - ./keploy/data:/usr/local/var/keploy
-    command: keploy proxy --port 3100 --target 3001 --host 127.0.0.1
+    command: keploy proxy --mode record --port 3100 --target 3001 --host 127.0.0.1
     # This proxies 3100 -> 127.0.0.1:3001 and records/replays traffic
-
