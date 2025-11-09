@@ -55,9 +55,8 @@ jobs:
 
   build:
     name: Build Docker Image
-    needs: test
     runs-on: ubuntu-latest
-    if: github.event_name != 'pull_request' && (needs.test.result == 'success' || needs.test.result == 'failure')
+    if: github.event_name != 'pull_request'
     outputs:
       image-tag: ${{ steps.meta.outputs.tags }}
       image-digest: ${{ steps.build.outputs.digest }}
@@ -104,7 +103,7 @@ jobs:
     name: Deploy to Staging
     needs: build
     runs-on: ubuntu-latest
-    if: (github.ref == 'refs/heads/staging' || (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'staging')) && (needs.build.result == 'success' || needs.build.result == 'failure')
+    if: github.ref == 'refs/heads/staging' || (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'staging')
     environment:
       name: staging
       url: https://staging.too.foo
@@ -146,7 +145,7 @@ jobs:
     name: Deploy to Production
     needs: build
     runs-on: ubuntu-latest
-    if: (github.ref == 'refs/heads/main' || (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'production')) && (needs.build.result == 'success' || needs.build.result == 'failure')
+    if: github.ref == 'refs/heads/main' || (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'production')
     environment:
       name: production
       url: https://too.foo
