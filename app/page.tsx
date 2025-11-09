@@ -257,7 +257,13 @@ export default function Error404() {
         className="absolute inset-0 w-full h-full"
       />
       
-      {/* Unified Telemetry Dashboard */}
+      {/* Combined Telemetry Panel at Bottom */}
+      {/* 404 Message - Bottom Left */}
+      <div className="fixed bottom-4 left-4 text-red-500 font-mono text-sm opacity-70 z-50">
+        ERROR 404: The page you seek has evolved beyond existence
+      </div>
+      
+      {/* Unified Telemetry Dashboard - Bottom Center (draggable) */}
       <TelemetryDashboard
         performance={{
           fps,
@@ -285,13 +291,10 @@ export default function Error404() {
         }}
       />
       
-      {/* 404 Message */}
-      <div className="absolute top-4 left-4 text-red-500 font-mono text-sm opacity-70">
-        ERROR 404: The page you seek has evolved beyond existence
+      {/* Tech Stack Display - Bottom Right */}
+      <div className="fixed bottom-4 right-4 z-50">
+        <TechStackDisplay />
       </div>
-      
-      {/* Tech Stack Display - Static Info Only */}
-      <TechStackDisplay />
     </div>
   )
 }
