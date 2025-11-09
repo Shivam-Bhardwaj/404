@@ -27,8 +27,8 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 config = "0.14"
 # Randomness for simulation seeds
 rand = "0.8"
-# GPU monitoring via NVML
-nvidia-ml-sys = "5.0"
+# GPU monitoring via NVML (optional - requires NVIDIA drivers)
+nvidia-ml-sys = { version = "5.0", optional = true }
 
 [build-dependencies]
 which = "4"
@@ -36,6 +36,7 @@ which = "4"
 [features]
 default = []
 cuda-kernel = ["nvrtc"]
+gpu-stats = ["nvidia-ml-sys"]
 
 [dev-dependencies]
 # Testing and benchmarking
