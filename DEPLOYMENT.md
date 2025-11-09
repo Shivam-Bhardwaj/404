@@ -1,6 +1,6 @@
 # Deployment Guide for too.foo
 
-> **Heads-up:** Vercel hosting has been retired for this project. All deployments (staging + production) run on the self-hosted Docker/Traefik stack described below.
+> **Scope:** This document covers the self-hosted staging environment (`staging.too.foo`). The production domain (`too.foo`) is now running on a separate Vercel project and is managed outside of this repository.
 
 ## Initial Setup
 
