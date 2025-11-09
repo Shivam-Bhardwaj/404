@@ -1,5 +1,7 @@
 # Deployment Guide for too.foo
 
+> **Heads-up:** Vercel hosting has been retired for this project. All deployments (staging + production) run on the self-hosted Docker/Traefik stack described below.
+
 ## Initial Setup
 
 ### 1. Start Traefik
@@ -101,4 +103,3 @@ docker inspect --format='{{.State.Health.Status}}' 404-app-green
 # Stop old container
 docker compose stop app-blue
 ```
-

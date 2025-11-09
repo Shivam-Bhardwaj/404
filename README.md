@@ -54,6 +54,12 @@ npm run build
 npm run start
 ```
 
+## Deployment
+
+- Vercel is no longer part of this project’s deployment path—remove any local `.vercel` directories or project links.
+- Staging lives at `https://staging.too.foo` and production at `https://too.foo`, both backed by the Docker/Traefik stack defined in the `docker-compose.*` files.
+- CI/CD is handled through GitHub Actions (`.github/workflows/deploy.yml`) which builds images and redeploys the self-hosted infrastructure; use those pipelines instead of `vercel deploy`.
+
 ## Project Structure
 
 ```
