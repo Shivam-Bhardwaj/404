@@ -139,39 +139,76 @@ export function UnifiedTelemetryPanel({ performance, physics, ecosystemStats }: 
               </div>
             )}
 
-            {/* Score */}
-            <div className="flex items-center gap-2">
+            {/* Score with explanation */}
+            <div className="flex items-center gap-2" title="Performance score: FPS (50%) + Frame Time (30%) + Memory (20%)">
               <span className="text-gray-400">SCORE:</span>
               <span className={getMetricColor(100 - performance.performanceScore, { good: 20, warning: 40 })}>
                 {Math.round(performance.performanceScore)}%
               </span>
+              {performance.performanceScore < 50 && (
+                <span className="text-red-400 text-[7px]">(LOW)</span>
+              )}
             </div>
           </div>
 
           {/* Secondary row - GPU and tech stack info */}
-          <div className="flex flex-wrap items-center justify-between gap-2 mt-1 text-[8px] text-gray-500">
-            {/* GPU Info */}
+          <div className="flex flex-wrap items-center justify-between gap-2 mt-1 text-[8px]">
+            {/* GPU Info - Enhanced */}
             <div className="flex items-center gap-2">
               {techStack && (
                 <>
-                  <span>GPU: {techStack.gpu}</span>
-                  {techStack.cudaReady && <span className="text-blue-400">(CUDA Ready)</span>}
+                  <span className="text-gray-400">GPU:</span>
+                  <span className="text-green-400">{techStack.gpu}</span>
+                  {techStack.cudaReady ? (
+                    <span className="text-blue-400 font-bold">[CUDA]</span>
+                  ) : (
+                    <span className="text-red-400">[NO CUDA]</span>
+                  )}
                 </>
               )}
               {gpuStats && (
                 <>
                   {gpuStats.gpu_utilization !== null && (
-                    <span>UTIL: {gpuStats.gpu_utilization}%</span>
+                    <>
+                      <span className="text-gray-400">GPU:</span>
+                      <span className={
+                        gpuStats.gpu_utilization > 80 ? 'text-green-400' :
+                        gpuStats.gpu_utilization > 50 ? 'text-yellow-400' :
+                        gpuStats.gpu_utilization > 0 ? 'text-orange-400' : 'text-red-400'
+                      }>
+                        {gpuStats.gpu_utilization}%
+                      </span>
+                    </>
+                  )}
+                  {gpuStats.memory_used_mb !== null && gpuStats.memory_total_mb !== null && (
+                    <>
+                      <span className="text-gray-400">VRAM:</span>
+                      <span className="text-cyan-400">
+                        {gpuStats.memory_used_mb}MB/{gpuStats.memory_total_mb}MB
+                      </span>
+                      {gpuStats.memory_utilization !== null && (
+                        <span className="text-gray-500">
+                          ({gpuStats.memory_utilization}%)
+                        </span>
+                      )}
+                    </>
                   )}
                   {gpuStats.temperature_c !== null && (
-                    <span className={
-                      gpuStats.temperature_c > 85 ? 'text-red-400' :
-                      gpuStats.temperature_c > 75 ? 'text-yellow-400' : 'text-gray-500'
-                    }>
-                      {gpuStats.temperature_c}°C
-                    </span>
+                    <>
+                      <span className="text-gray-400">TEMP:</span>
+                      <span className={
+                        gpuStats.temperature_c > 85 ? 'text-red-400' :
+                        gpuStats.temperature_c > 75 ? 'text-yellow-400' : 'text-green-400'
+                      }>
+                        {gpuStats.temperature_c}°C
+                      </span>
+                    </>
                   )}
                 </>
+              )}
+              {/* Show if no GPU stats available */}
+              {!gpuStats && techStack && (
+                <span className="text-red-400">[NO GPU STATS]</span>
               )}
             </div>
 
@@ -186,12 +223,24 @@ export function UnifiedTelemetryPanel({ performance, physics, ecosystemStats }: 
               <span>TypeScript 5.3</span>
             </div>
 
-            {/* Physics modes */}
-            <div className="flex items-center gap-1">
-              <span className="px-1 py-0.5 bg-green-500 bg-opacity-10 rounded">SPH</span>
-              <span className="px-1 py-0.5 bg-green-500 bg-opacity-10 rounded">Boids</span>
-              <span className="px-1 py-0.5 bg-green-500 bg-opacity-10 rounded">Gray-Scott</span>
-              <span className="px-1 py-0.5 bg-green-500 bg-opacity-10 rounded">SDF</span>
+            {/* Simulation source status */}
+            <div className="flex items-center gap-2">
+              <span className="text-gray-400">SIM:</span>
+              {accelerationMode === 'server' ? (
+                <>
+                  <span className="text-green-400 font-bold">SERVER</span>
+                  {accelerator && (
+                    <span className={
+                      accelerator === 'cuda' ? 'text-blue-400' :
+                      accelerator === 'gpu' ? 'text-purple-400' : 'text-yellow-400'
+                    }>
+                      ({accelerator.toUpperCase()})
+                    </span>
+                  )}
+                </>
+              ) : (
+                <span className="text-red-400 font-bold">LOCAL (BROWSER)</span>
+              )}
             </div>
 
             {/* Device tier */}

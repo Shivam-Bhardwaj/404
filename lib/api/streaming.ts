@@ -2,8 +2,19 @@
 function buildWebSocketUrl(): string {
   const apiBase = process.env.NEXT_PUBLIC_PHYSICS_API_BASE ?? ''
   
-  // If empty or just "/", use default localhost
+  // If empty or just "/", try to detect production vs development
   if (!apiBase || apiBase === '/') {
+    // In browser, check if we're on HTTPS (production) or HTTP (development)
+    if (typeof window !== 'undefined') {
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+      const host = window.location.hostname
+      // Use port 3001 for backend, or same port if proxied
+      const port = window.location.port ? `:${window.location.port}` : ''
+      // If on same domain, try /ws directly (backend is on /ws, not /api/ws)
+      // First try /ws, if that fails the connection handler will handle it
+      return `${protocol}//${host}${port}/ws`
+    }
+    // Fallback for SSR
     return 'ws://localhost:3001/ws'
   }
   
@@ -19,7 +30,10 @@ function buildWebSocketUrl(): string {
     wsBase = `ws://${wsBase}`
   }
   
-  // Add /ws path
+  // Add /ws path (or /api/ws if using API base)
+  if (wsBase.includes('/api')) {
+    return `${wsBase}/ws`
+  }
   return `${wsBase}/ws`
 }
 
@@ -38,8 +52,10 @@ export class SimulationStream {
   private reconnectDelay = 1000
   private onStateCallback: ((states: StreamedBoidState[]) => void) | null = null
   private onErrorCallback: ((error: Error) => void) | null = null
+  private onConnectionStatusCallback: ((connected: boolean) => void) | null = null
   private isConnecting = false
   private shouldReconnect = true
+  private connectionStatus: 'disconnected' | 'connecting' | 'connected' = 'disconnected'
 
   constructor() {
     // Auto-reconnect on close
@@ -66,7 +82,11 @@ export class SimulationStream {
           this.ws = ws
           this.isConnecting = false
           this.reconnectAttempts = 0
+          this.connectionStatus = 'connected'
           console.log('[SimulationStream] WebSocket connected')
+          if (this.onConnectionStatusCallback) {
+            this.onConnectionStatusCallback(true)
+          }
           resolve()
         }
         
@@ -89,7 +109,11 @@ export class SimulationStream {
         ws.onclose = (event) => {
           this.ws = null
           this.isConnecting = false
+          this.connectionStatus = 'disconnected'
           console.log(`[SimulationStream] WebSocket closed (code: ${event.code}, reason: ${event.reason || 'none'})`)
+          if (this.onConnectionStatusCallback) {
+            this.onConnectionStatusCallback(false)
+          }
           
           if (this.shouldReconnect && this.reconnectAttempts < this.maxReconnectAttempts) {
             this.reconnectAttempts++
@@ -150,6 +174,14 @@ export class SimulationStream {
 
   onError(callback: (error: Error) => void): void {
     this.onErrorCallback = callback
+  }
+
+  onConnectionStatus(callback: (connected: boolean) => void): void {
+    this.onConnectionStatusCallback = callback
+  }
+
+  getConnectionStatus(): 'disconnected' | 'connecting' | 'connected' {
+    return this.connectionStatus
   }
 
   disconnect(): void {

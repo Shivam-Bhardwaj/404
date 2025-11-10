@@ -22,6 +22,7 @@ export class EcosystemPhase implements AnimationPhase {
   private latestStats: { total: number; predators: number; prey: number; producers: number; avgEnergy: number } | null = null
   private sourceTracker = SimulationSourceTracker.getInstance()
   private useStreaming = true
+  private wsConnected = false
   
   constructor(width: number, height: number) {
     this.boids = new BoidsSystem(width, height)
@@ -91,20 +92,40 @@ export class EcosystemPhase implements AnimationPhase {
       
       stream.onError((error: Error) => {
         console.warn('WebSocket stream error:', error)
+        this.wsConnected = false
         this.useStreaming = false
+        this.reportSource('local', {
+          accelerator: 'cpu',
+        })
         if (this.renderOrganisms.length === 0) {
           this.initLocalOrganisms()
         }
       })
       
+      stream.onConnectionStatus((connected: boolean) => {
+        this.wsConnected = connected
+        if (!connected && this.useStreaming) {
+          console.warn('WebSocket disconnected, falling back to local simulation')
+          this.reportSource('local', {
+            accelerator: 'cpu',
+          })
+        }
+      })
+      
       stream.connect().then(() => {
         this.stream = stream
+        this.wsConnected = true
         this.reportSource('server', {
+          accelerator: 'cuda',
           sampleSize: 0, // Will be updated when first state arrives
         })
       }).catch((error) => {
         console.warn('Failed to connect WebSocket stream:', error)
+        this.wsConnected = false
         this.useStreaming = false
+        this.reportSource('local', {
+          accelerator: 'cpu',
+        })
         this.initLocalOrganisms()
       })
     } catch (error) {
@@ -196,7 +217,7 @@ export class EcosystemPhase implements AnimationPhase {
   update(dt: number): void {
     this.progress = Math.min(1, this.progress + dt / this.duration)
     
-    if (this.useStreaming && this.stream && this.stream.isConnected()) {
+    if (this.useStreaming && this.stream && this.stream.isConnected() && this.wsConnected) {
       // Using WebSocket stream - updates come via callbacks
       // Just ensure renderOrganisms is set
       if (this.renderOrganisms.length === 0 && this.streamedOrganisms.length > 0) {
@@ -204,6 +225,13 @@ export class EcosystemPhase implements AnimationPhase {
       }
     } else {
       // Fallback to local simulation
+      if (this.useStreaming && !this.wsConnected) {
+        // WebSocket failed, switch to local permanently
+        this.useStreaming = false
+        this.reportSource('local', {
+          accelerator: 'cpu',
+        })
+      }
       this.updateLocalBoids(dt)
     }
     

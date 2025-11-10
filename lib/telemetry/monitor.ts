@@ -196,11 +196,24 @@ export class PerformanceMonitor {
   
   // Get performance score (0-100)
   getPerformanceScore(): number {
-    const fpsScore = Math.min(100, (this.currentFPS / 60) * 100)
-    const frameTimeScore = Math.max(0, 100 - ((this.currentFrameTime - 16.67) / 16.67) * 100)
-    const memoryScore = Math.max(0, 100 - (this.currentMemory / 100) * 100) // Penalize > 100MB
+    // FPS score: 60 FPS = 100%, scales down linearly
+    const fpsScore = Math.min(100, Math.max(0, (this.currentFPS / 60) * 100))
     
-    return (fpsScore * 0.5 + frameTimeScore * 0.3 + memoryScore * 0.2)
+    // Frame time score: 16.67ms = 100%, penalize longer frame times
+    // Cap at 100ms frame time (6 FPS) for scoring purposes
+    const targetFrameTime = 16.67
+    const maxFrameTime = 100.0
+    const clampedFrameTime = Math.min(this.currentFrameTime, maxFrameTime)
+    const frameTimeScore = Math.max(0, 100 - ((clampedFrameTime - targetFrameTime) / targetFrameTime) * 100)
+    
+    // Memory score: < 50MB = 100%, penalize > 100MB
+    const memoryScore = Math.max(0, 100 - ((this.currentMemory - 50) / 50) * 100)
+    
+    // Weighted average: FPS is most important, then frame time, then memory
+    const score = (fpsScore * 0.5 + frameTimeScore * 0.3 + memoryScore * 0.2)
+    
+    // Ensure score is between 0 and 100
+    return Math.max(0, Math.min(100, score))
   }
   
   reset(): void {
