@@ -394,27 +394,43 @@ async fn main() -> anyhow::Result<()> {
                 broadcast::BroadcastState::encode(&engine_ref)
             }).await {
                 Ok(Ok(state)) => {
+                    // Capture num_boids before moving state
+                    let num_boids = state.num_boids;
                     // Send to all subscribers (non-blocking)
                     let _ = tx_ref.send(state);
                     consecutive_failures = 0;
-                    last_success = std::time::Instant::now();
+                    let now = std::time::Instant::now();
+                    let elapsed = now.duration_since(last_success);
+                    // Log first successful broadcast after restart
+                    if elapsed.as_secs() > 5 {
+                        info!("Broadcast encoding succeeded! Sending {} boids to WebSocket clients", num_boids);
+                    }
+                    last_success = now;
                 }
                 Ok(Err(e)) => {
                     consecutive_failures += 1;
-                    // If we get InvalidContext error, try to reinitialize CUDA context
+                    // Log the actual error for debugging
                     let error_str = format!("{:?}", e);
-                    if error_str.contains("InvalidContext") || error_str.contains("context") {
-                        warn!("CUDA context error in broadcast encoding: {:?}", e);
-                    }
-                    
-                    // If encoding fails repeatedly, log warning
-                    if consecutive_failures % 100 == 0 {
-                        warn!("Failed to encode broadcast state ({} consecutive failures): {:?}", consecutive_failures, e);
+                    if error_str.contains("Cached state not yet available") {
+                        // This is expected right after restart - simulation needs time to populate cache
+                        if consecutive_failures % 60 == 0 { // Log every ~1 second at 60 FPS
+                            info!("Waiting for simulation to populate cached state... (attempt {})", consecutive_failures);
+                        }
+                    } else {
+                        // Other errors are more serious
+                        if error_str.contains("InvalidContext") || error_str.contains("context") {
+                            warn!("CUDA context error in broadcast encoding: {:?}", e);
+                        }
+                        
+                        // If encoding fails repeatedly, log warning
+                        if consecutive_failures % 100 == 0 {
+                            warn!("Failed to encode broadcast state ({} consecutive failures): {:?}", consecutive_failures, e);
+                        }
                     }
                     
                     // If we haven't had a success in 5 seconds, something is seriously wrong
                     if last_success.elapsed().as_secs() > 5 {
-                        warn!("No successful broadcasts for 5 seconds, simulation may be stuck");
+                        warn!("No successful broadcasts for 5 seconds, simulation may be stuck. Error: {:?}", e);
                     }
                 }
                 Err(e) => {
