@@ -35,13 +35,34 @@ impl CudaContext {
     /// Ensure CUDA context is active in current thread
     /// This must be called before any CUDA operations in a new thread
     pub fn ensure_context(&self) -> Result<()> {
+        // Try to initialize CUDA first if not already initialized
+        // This is safe to call multiple times
+        if let Err(_) = rustacuda::init(CudaFlags::empty()) {
+            // CUDA might already be initialized, which is fine
+        }
+        
         // In rustacuda, contexts are thread-local
-        // Create context if it doesn't exist
-        Context::create_and_push(
+        // Try to create context if it doesn't exist
+        // If context already exists, this will return an error, which we can ignore
+        match Context::create_and_push(
             ContextFlags::MAP_HOST | ContextFlags::SCHED_AUTO,
             *self.device
-        ).context("Failed to create CUDA context in thread")?;
-        Ok(())
+        ) {
+            Ok(_) => Ok(()),
+            Err(e) => {
+                // Check if context already exists by trying to get current context
+                match Context::get_current() {
+                    Ok(_) => {
+                        // Context already exists, that's fine
+                        Ok(())
+                    }
+                    Err(_) => {
+                        // No context exists and we failed to create one
+                        Err(anyhow::anyhow!("Failed to create CUDA context in thread: {:?}", e))
+                    }
+                }
+            }
+        }
     }
 }
 

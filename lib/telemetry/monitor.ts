@@ -71,13 +71,54 @@ export class PerformanceMonitor {
   }
   
   private checkMemory(): void {
+    let usedMB = 0
+    
+    // Try Chrome's performance.memory API first
     if ('memory' in performance) {
-      const memInfo = (performance as any).memory
-      const usedMB = memInfo.usedJSHeapSize / 1048576
-      MemoryManager.getInstance().processSample(usedMB)
+      try {
+        const memInfo = (performance as any).memory
+        if (memInfo && typeof memInfo.usedJSHeapSize === 'number') {
+          usedMB = memInfo.usedJSHeapSize / 1048576
+          MemoryManager.getInstance().processSample(usedMB)
+          this.currentMemory = usedMB
+          return
+        }
+      } catch (e) {
+        // Fall through to fallback methods
+      }
+    }
+    
+    // Fallback: Try navigator.deviceMemory API (if available)
+    if ('deviceMemory' in navigator && typeof (navigator as any).deviceMemory === 'number') {
+      const deviceMemoryGB = (navigator as any).deviceMemory
+      // Estimate usage as a percentage of device memory (rough estimate)
+      // This is just a fallback indicator, not accurate
+      const memoryManager = MemoryManager.getInstance()
+      const stats = memoryManager.getStats()
+      if (stats.currentUsage > 0) {
+        // Use cached value if available
+        this.currentMemory = stats.currentUsage
+        return
+      }
+      // If no cached value, estimate based on device memory
+      // Assume we're using a small percentage as a placeholder
+      usedMB = deviceMemoryGB * 1024 * 0.1 // 10% estimate
+      memoryManager.processSample(usedMB)
       this.currentMemory = usedMB
+      return
+    }
+    
+    // Final fallback: Use MemoryManager's cached value or estimate
+    const memoryManager = MemoryManager.getInstance()
+    const stats = memoryManager.getStats()
+    if (stats.currentUsage > 0) {
+      this.currentMemory = stats.currentUsage
     } else {
-      this.currentMemory = MemoryManager.getInstance().getMemoryUsage()
+      // Last resort: estimate based on typical web app memory usage
+      // This is a rough estimate and won't be accurate
+      usedMB = 50 // Default estimate of 50MB
+      memoryManager.processSample(usedMB)
+      this.currentMemory = usedMB
     }
   }
   

@@ -127,11 +127,19 @@ export default function Error404() {
     // Start first phase
     phaseManager.reset()
     
+    // Fixed-rate animation loop for constant 60 FPS across all devices
+    const TARGET_FPS = 60
+    const TARGET_FRAME_TIME = 1000 / TARGET_FPS // 16.67ms
     let lastTime = performance.now()
     let frameCount = 0
     let fpsTime = 0
+    let timeoutId: ReturnType<typeof setTimeout> | null = null
+    let isRunning = true
     
-    const animate = (currentTime: number) => {
+    const animate = () => {
+      if (!isRunning) return
+      
+      const currentTime = performance.now()
       const dt = currentTime - lastTime
       lastTime = currentTime
       
@@ -172,9 +180,11 @@ export default function Error404() {
         }
       }
       
-      // Update phase manager
+      // Update phase manager with fixed delta time for consistent simulation
+      // Use target frame time instead of actual dt to maintain constant rate
+      const fixedDt = TARGET_FRAME_TIME
       if (phaseManagerRef.current) {
-        phaseManagerRef.current.update(dt)
+        phaseManagerRef.current.update(fixedDt)
         phaseManagerRef.current.render(ctx)
         
         // Update UI state
@@ -200,10 +210,17 @@ export default function Error404() {
         }
       }
       
-      animationRef.current = requestAnimationFrame(animate)
+      // Calculate next frame time with precise timing
+      const frameStart = performance.now()
+      const frameDuration = frameStart - currentTime
+      const delay = Math.max(0, TARGET_FRAME_TIME - frameDuration)
+      
+      // Schedule next frame
+      timeoutId = setTimeout(animate, delay)
     }
     
-    animate(performance.now())
+    // Start animation loop
+    animate()
     
     // Handle resize
     const handleResize = () => {
@@ -219,6 +236,11 @@ export default function Error404() {
     window.addEventListener('resize', handleResize)
     
     return () => {
+      isRunning = false
+      if (timeoutId !== null) {
+        clearTimeout(timeoutId)
+        timeoutId = null
+      }
       if (animationRef.current) {
         cancelAnimationFrame(animationRef.current)
       }

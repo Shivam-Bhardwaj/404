@@ -337,6 +337,13 @@ async fn main() -> anyhow::Result<()> {
     let engine_clone = Arc::clone(&simulation_engine);
     let tx_clone = broadcast_tx.clone();
     tokio::spawn(async move {
+        // Initialize CUDA in this async task's thread
+        // Note: CUDA contexts are thread-local, so we need to initialize
+        // when the task first runs on a thread
+        if let Err(e) = cuda::init_cuda_in_thread() {
+            warn!("Failed to initialize CUDA in broadcast task thread: {:?}", e);
+        }
+        
         let mut interval = tokio::time::interval(std::time::Duration::from_millis(16)); // 60 FPS broadcast
         
         loop {
@@ -348,6 +355,14 @@ async fn main() -> anyhow::Result<()> {
                     let _ = tx_clone.send(state);
                 }
                 Err(e) => {
+                    // If we get InvalidContext error, try to reinitialize CUDA
+                    let error_str = format!("{:?}", e);
+                    if error_str.contains("InvalidContext") || error_str.contains("context") {
+                        // Try to reinitialize CUDA context
+                        if let Err(init_err) = cuda::init_cuda_in_thread() {
+                            warn!("Failed to reinitialize CUDA context: {:?}", init_err);
+                        }
+                    }
                     warn!("Failed to encode broadcast state: {:?}", e);
                 }
             }
