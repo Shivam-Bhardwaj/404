@@ -42,12 +42,13 @@ export class EcosystemPhase implements AnimationPhase {
     }
     
     // Try to connect to WebSocket stream
+    // Don't immediately fall back to local - wait for connection attempt
     if (this.useStreaming) {
       this.connectStream()
-    }
-    
-    // Fallback: Start with local organisms if streaming fails
-    if (!this.useStreaming || !this.stream) {
+      // Don't initialize local organisms here - wait for connection result
+      // The connectStream() method will call initLocalOrganisms() if connection fails
+    } else {
+      // Only init local if streaming is explicitly disabled
       this.initLocalOrganisms()
     }
   }
