@@ -374,13 +374,6 @@ async fn main() -> anyhow::Result<()> {
     let engine_clone = Arc::clone(&simulation_engine);
     let tx_clone = broadcast_tx.clone();
     tokio::spawn(async move {
-        // Initialize CUDA in this async task's thread
-        // Note: CUDA contexts are thread-local, so we need to initialize
-        // when the task first runs on a thread
-        if let Err(e) = cuda::init_cuda_in_thread() {
-            warn!("Failed to initialize CUDA in broadcast task thread: {:?}", e);
-        }
-        
         let mut interval = tokio::time::interval(std::time::Duration::from_millis(16)); // 60 FPS broadcast
         let mut consecutive_failures = 0;
         let mut last_success = std::time::Instant::now();
@@ -388,22 +381,30 @@ async fn main() -> anyhow::Result<()> {
         loop {
             interval.tick().await;
             
-            match broadcast::BroadcastState::encode(&engine_clone) {
-                Ok(state) => {
+            // Use spawn_blocking to ensure CUDA context is available
+            // CUDA contexts are thread-local, so we need a dedicated thread
+            let engine_ref = Arc::clone(&engine_clone);
+            let tx_ref = tx_clone.clone();
+            
+            match tokio::task::spawn_blocking(move || {
+                // Initialize CUDA in this blocking thread
+                if let Err(e) = cuda::init_cuda_in_thread() {
+                    warn!("Failed to initialize CUDA in broadcast encoding thread: {:?}", e);
+                }
+                broadcast::BroadcastState::encode(&engine_ref)
+            }).await {
+                Ok(Ok(state)) => {
                     // Send to all subscribers (non-blocking)
-                    let _ = tx_clone.send(state);
+                    let _ = tx_ref.send(state);
                     consecutive_failures = 0;
                     last_success = std::time::Instant::now();
                 }
-                Err(e) => {
+                Ok(Err(e)) => {
                     consecutive_failures += 1;
                     // If we get InvalidContext error, try to reinitialize CUDA context
                     let error_str = format!("{:?}", e);
                     if error_str.contains("InvalidContext") || error_str.contains("context") {
-                        // Try to reinitialize CUDA context
-                        if let Err(init_err) = cuda::init_cuda_in_thread() {
-                            warn!("Failed to reinitialize CUDA context: {:?}", init_err);
-                        }
+                        warn!("CUDA context error in broadcast encoding: {:?}", e);
                     }
                     
                     // If encoding fails repeatedly, log warning
@@ -415,6 +416,9 @@ async fn main() -> anyhow::Result<()> {
                     if last_success.elapsed().as_secs() > 5 {
                         warn!("No successful broadcasts for 5 seconds, simulation may be stuck");
                     }
+                }
+                Err(e) => {
+                    warn!("Broadcast encoding task panicked: {:?}", e);
                 }
             }
         }
