@@ -12,8 +12,10 @@ rustacuda_core = "0.1"
 nvrtc = { version = "0.1", optional = true }
 # Async runtime for API server
 tokio = { version = "1.35", features = ["full"] }
-# HTTP server
-axum = "0.7"
+# Futures utilities for WebSocket
+futures-util = "0.3"
+# HTTP server with WebSocket support
+axum = { version = "0.7", features = ["ws"] }
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
@@ -41,6 +43,8 @@ gpu-stats = ["nvml-wrapper"]
 [dev-dependencies]
 # Testing and benchmarking
 criterion = { version = "0.5", features = ["html_reports"] }
+# Async testing
+tokio-test = "0.4"
 
 [[bin]]
 name = "physics-backend"

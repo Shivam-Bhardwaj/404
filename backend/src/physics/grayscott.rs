@@ -4,20 +4,20 @@ use crate::cuda::CudaContext;
 use anyhow::Result;
 use rustacuda::prelude::*;
 use rustacuda::memory::DeviceBuffer;
-use rustacuda::launch;
-use rustacuda::function::Function;
-use std::ffi::CString;
 #[cfg(feature = "cuda-kernel")]
 use nvrtc::NvrtcProgram;
 use std::sync::Arc;
 
 pub struct GrayScottSimulation {
+    #[allow(dead_code)]
     context: Arc<CudaContext>,
     width: usize,
     height: usize,
     u_field: DeviceBuffer<f32>,  // Concentration field u
     v_field: DeviceBuffer<f32>,  // Catalyst field v
+    #[allow(dead_code)]
     u_temp: DeviceBuffer<f32>,    // Temporary buffer for u
+    #[allow(dead_code)]
     v_temp: DeviceBuffer<f32>,   // Temporary buffer for v
     // Gray-Scott parameters
     du: f32,  // Diffusion rate for u

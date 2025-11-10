@@ -1,6 +1,8 @@
 // API server implementation with physics simulation endpoints
+#![allow(dead_code, unused_variables)]
+
 use axum::{
-    extract::State,
+    extract::{State, ws::WebSocketUpgrade},
     http::StatusCode,
     response::Json,
     routing::{get, post},
@@ -8,12 +10,15 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
-use tracing::{info, Level};
+use tokio::sync::broadcast as tokio_broadcast;
+use tracing::{info, warn, Level};
 use tracing_subscriber;
 
+mod broadcast;
 mod cuda;
 mod gpu_stats;
 mod physics;
+mod simulation_engine;
 #[cfg(test)]
 mod tests;
 
@@ -21,11 +26,16 @@ mod tests;
 struct AppState {
     cuda_context: Arc<cuda::CudaContext>,
     boids_simulation: Arc<Mutex<physics::BoidsSimulation>>,
+    #[allow(dead_code)]
+    simulation_engine: Arc<simulation_engine::SimulationEngine>,
+    broadcast_tx: tokio_broadcast::Sender<broadcast::BroadcastState>,
 }
 
 #[derive(Deserialize, Debug)]
 struct SimulationRequest {
+    #[allow(dead_code)]
     simulation_type: String,
+    #[allow(dead_code)]
     num_particles: Option<usize>,
     steps: Option<usize>,
 }
@@ -40,7 +50,9 @@ struct SimulationResponse {
 
 #[derive(Serialize)]
 struct SimulationMetadata {
+    #[allow(dead_code)]
     simulation_type: String,
+    #[allow(dead_code)]
     num_particles: usize,
     computation_time_ms: u128,
     accelerator: String,
@@ -48,6 +60,71 @@ struct SimulationMetadata {
 
 async fn health() -> &'static str {
     "OK"
+}
+
+async fn websocket_handler(
+    ws: WebSocketUpgrade,
+    State(state): State<AppState>,
+) -> axum::response::Response {
+    let rx = state.broadcast_tx.subscribe();
+    
+    ws.on_upgrade(|socket| async move {
+        handle_websocket(socket, rx).await;
+    })
+}
+
+async fn handle_websocket(
+    socket: axum::extract::ws::WebSocket,
+    mut rx: tokio_broadcast::Receiver<broadcast::BroadcastState>,
+) {
+    use axum::extract::ws::Message;
+    use futures_util::{SinkExt, StreamExt};
+    
+    let (mut sender, mut receiver) = socket.split();
+    
+    // Spawn task to send simulation updates
+    let send_task = tokio::spawn(async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_millis(16)); // ~60 FPS
+        
+        loop {
+            tokio::select! {
+                _ = interval.tick() => {
+                    match rx.try_recv() {
+                        Ok(state) => {
+                            // Send binary data: [timestamp (u64), num_boids (u32), data...]
+                            let mut message = Vec::with_capacity(12 + state.data.len());
+                            message.extend_from_slice(&state.timestamp.to_le_bytes());
+                            message.extend_from_slice(&(state.num_boids as u32).to_le_bytes());
+                            message.extend_from_slice(&state.data);
+                            
+                            if sender.send(Message::Binary(message)).await.is_err() {
+                                break;
+                            }
+                        }
+                        Err(tokio_broadcast::error::TryRecvError::Empty) => {
+                            // No new data, continue
+                        }
+                        Err(_) => {
+                            // Channel closed
+                            break;
+                        }
+                    }
+                }
+                result = receiver.next() => {
+                    match result {
+                        Some(Ok(Message::Close(_))) => break,
+                        Some(Ok(_)) => {
+                            // Ignore incoming messages (read-only)
+                        }
+                        Some(Err(_)) => break,
+                        None => break,
+                    }
+                }
+            }
+        }
+    });
+    
+    send_task.await.ok();
 }
 
 async fn gpu_info(State(state): State<AppState>) -> Result<Json<serde_json::Value>, StatusCode> {
@@ -236,7 +313,53 @@ async fn main() -> anyhow::Result<()> {
         physics::BoidsSimulation::new(&cuda_context, 1000)?
     ));
     
-    let state = AppState { cuda_context, boids_simulation };
+    // Create persistent simulation engine with larger particle count
+    // Try to maximize - start with 100K, fall back if needed
+    let num_boids = 100_000;
+    info!("Creating simulation engine with {} boids", num_boids);
+    let simulation_engine = Arc::new(
+        simulation_engine::SimulationEngine::new(&cuda_context, num_boids)
+            .map_err(|e| {
+                warn!("Failed to create simulation engine with {} boids: {:?}, falling back to 10K", num_boids, e);
+                e
+            })
+            .or_else(|_| simulation_engine::SimulationEngine::new(&cuda_context, 10_000))?
+    );
+    
+    // Start the persistent simulation loop
+    simulation_engine.start()?;
+    info!("Simulation engine started");
+    
+    // Create broadcast channel for WebSocket clients
+    let (broadcast_tx, _) = tokio_broadcast::channel::<broadcast::BroadcastState>(100);
+    
+    // Spawn broadcast task
+    let engine_clone = Arc::clone(&simulation_engine);
+    let tx_clone = broadcast_tx.clone();
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_millis(16)); // 60 FPS broadcast
+        
+        loop {
+            interval.tick().await;
+            
+            match broadcast::BroadcastState::encode(&engine_clone) {
+                Ok(state) => {
+                    // Send to all subscribers (non-blocking)
+                    let _ = tx_clone.send(state);
+                }
+                Err(e) => {
+                    warn!("Failed to encode broadcast state: {:?}", e);
+                }
+            }
+        }
+    });
+    
+    let state = AppState { 
+        cuda_context, 
+        boids_simulation,
+        simulation_engine,
+        broadcast_tx,
+    };
 
     // Build application
     let app = Router::new()
@@ -246,6 +369,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/simulate/sph", post(simulate_sph))
         .route("/api/simulate/boids", post(simulate_boids))
         .route("/api/simulate/grayscott", post(simulate_grayscott))
+        .route("/ws", get(websocket_handler))
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3001").await?;
@@ -257,6 +381,7 @@ async fn main() -> anyhow::Result<()> {
     info!("  POST /api/simulate/sph");
     info!("  POST /api/simulate/boids");
     info!("  POST /api/simulate/grayscott");
+    info!("  WS   /ws");
     
     axum::serve(listener, app).await?;
     

@@ -1,201 +1,199 @@
-# Testing and Validation Guide
+# Testing Guide: GPU Mothership Architecture
 
-## Pre-Deployment Validation
+## Quick Start
 
-Run the validation script to check all components:
-
-```bash
-cd /404-public/repo
-./validate.sh
-```
-
-This script checks:
-- Docker installation and configuration
-- Docker networks
-- Traefik reverse proxy
-- Application containers and health checks
-- Monitoring stack (Prometheus, Grafana, Loki, AlertManager)
-- Backup system
-- CI/CD workflows
-- Configuration files
-
-## Manual Testing
-
-### 1. Test Health Endpoints Locally
+### 1. Start the Backend Server
 
 ```bash
-# Build and run container locally
-cd /404-public/repo
-docker build -t 404-test .
-docker run -d -p 3000:3000 --name 404-test 404-test
-
-# Wait for container to start
-sleep 10
-
-# Test health endpoint
-curl http://localhost:3000/api/health
-curl http://localhost:3000/api/ready
-
-# Cleanup
-docker stop 404-test
-docker rm 404-test
+cd /404-public/repo/backend
+cargo run --release
 ```
 
-### 2. Test Zero-Downtime Deployment
+Expected output:
+```
+INFO: Initializing CUDA context...
+INFO: CUDA Device: <your GPU name>
+INFO: Creating simulation engine with 100000 boids
+INFO: Starting persistent simulation engine at 500 Hz
+INFO: Simulation engine started
+INFO: Physics backend server listening on http://0.0.0.0:3001
+INFO: Endpoints:
+INFO:   GET  /health
+INFO:   GET  /api/gpu-info
+INFO:   GET  /api/gpu-stats
+INFO:   POST /api/simulate/sph
+INFO:   POST /api/simulate/boids
+INFO:   POST /api/simulate/grayscott
+INFO:   WS   /ws
+```
+
+### 2. Test WebSocket Connection
+
+#### Option A: Browser Console Test
+
+Open browser console on your frontend and run:
+
+```javascript
+const ws = new WebSocket('ws://localhost:3001/ws');
+ws.binaryType = 'arraybuffer';
+
+ws.onopen = () => console.log('✅ Connected!');
+ws.onmessage = (event) => {
+  const data = new DataView(event.data);
+  const timestamp = Number(data.getBigUint64(0, true));
+  const numBoids = data.getUint32(8, true);
+  console.log(`📦 Received: ${numBoids} boids at timestamp ${timestamp}`);
+};
+ws.onerror = (error) => console.error('❌ Error:', error);
+ws.onclose = () => console.log('🔌 Disconnected');
+```
+
+#### Option B: Using `websocat` (if installed)
 
 ```bash
-cd /404-public/repo
-
-# Start blue container
-docker compose up -d app-blue
-
-# Wait for health check
-docker inspect --format='{{.State.Health.Status}}' 404-app-blue
-
-# Start green container
-docker compose up -d app-green
-
-# Wait for health check
-docker inspect --format='{{.State.Health.Status}}' 404-app-green
-
-# Test both containers respond
-curl http://localhost:3000/api/health  # Should work for both
-
-# Switch traffic (manual Traefik update)
-# Stop blue
-docker compose stop app-blue
-
-# Verify green still responds
-curl http://localhost:3000/api/health
+websocat ws://localhost:3001/ws --binary
 ```
 
-### 3. Test Monitoring Stack
+#### Option C: Node.js Test Script
+
+```javascript
+const WebSocket = require('ws');
+const ws = new WebSocket('ws://localhost:3001/ws');
+
+ws.on('open', () => {
+  console.log('✅ Connected to WebSocket');
+});
+
+ws.on('message', (data) => {
+  const view = new DataView(data.buffer);
+  const timestamp = Number(view.getBigUint64(0, true));
+  const numBoids = view.getUint32(8, true);
+  console.log(`📦 ${numBoids} boids @ ${timestamp}ms`);
+});
+
+ws.on('error', (error) => {
+  console.error('❌ Error:', error);
+});
+```
+
+### 3. Test Frontend Integration
+
+1. **Start the frontend** (if not already running):
+   ```bash
+   cd /404-public/repo
+   npm run dev
+   ```
+
+2. **Navigate to the ecosystem phase** - The ecosystem should automatically connect to the WebSocket.
+
+3. **Check browser console** for:
+   - `WebSocket connected` message
+   - No errors about failed connections
+   - Smooth animation (no stuttering)
+
+### 4. Verify Performance
+
+#### Check Backend Logs
+
+Look for:
+- ✅ `Simulation engine started` - Engine is running
+- ✅ No `Simulation falling behind target FPS` warnings
+- ✅ Regular WebSocket connections
+
+#### Check Frontend Performance
+
+Open browser DevTools → Performance tab:
+- **Frame rate**: Should be 60 FPS
+- **No dropped frames**: Smooth animation
+- **Network tab**: WebSocket connection shows continuous messages
+
+#### Monitor GPU Usage
 
 ```bash
-# Check Prometheus metrics
-curl http://localhost:9090/metrics
-
-# Check Grafana (after setup)
-curl http://localhost:3000/api/health
-
-# Check Loki logs
-curl http://localhost:3100/ready
-
-# Check AlertManager
-curl http://localhost:9093/-/healthy
+# If nvidia-smi is available
+watch -n 1 nvidia-smi
 ```
 
-### 4. Test Backup System
+Expected:
+- GPU utilization: 50-95%
+- Memory usage: Depends on particle count
+- Temperature: < 80°C
 
-```bash
-# Run backup manually
-/404-system/backup/scripts/backup.sh
+### 5. Load Testing (Multiple Clients)
 
-# Verify backup files created
-ls -lh /404-system/backups/daily/
+Test with multiple browser tabs/windows:
 
-# Test restore (dry run)
-# Review restore script
-cat /404-system/backup/scripts/restore.sh
+1. Open 5-10 browser tabs to your frontend
+2. All should connect to the same WebSocket
+3. All should show smooth animation
+4. Check backend logs for connection count
+
+### 6. Verify Binary Protocol
+
+The WebSocket sends binary data in this format:
+```
+[timestamp: u64 (8 bytes)] [num_boids: u32 (4 bytes)] [boid_data: f32[] (16 bytes per boid)]
 ```
 
-### 5. Test Staging Environment
+Each boid is: `[x: f32, y: f32, vx: f32, vy: f32]`
 
-```bash
-cd /404-public/repo
+### 7. Troubleshooting
 
-# Deploy to staging
-docker compose -f docker-compose.staging.yml up -d --build
+#### Backend won't start
+- Check CUDA is installed: `nvidia-smi`
+- Check port 3001 is available: `lsof -i :3001`
+- Check logs for CUDA initialization errors
 
-# Test staging endpoint (after DNS setup)
-curl https://staging.too.foo/api/health
-```
+#### WebSocket connection fails
+- Verify backend is running: `curl http://localhost:3001/health`
+- Check WebSocket URL matches backend address
+- Check browser console for CORS/connection errors
 
-## Post-Deployment Checks
+#### No particles visible
+- Check browser console for WebSocket messages
+- Verify `handleStreamedState` is being called
+- Check that `renderOrganisms` array has data
 
-After deployment, verify:
+#### Slow/stuttering animation
+- Check GPU utilization (should be high)
+- Verify WebSocket messages arriving at 60 FPS
+- Check browser performance tab for bottlenecks
+- Reduce particle count if needed (modify `num_boids` in `main.rs`)
 
-1. **Production Site**: https://too.foo
-   - Site loads correctly
-   - SSL certificate is valid
-   - Health endpoint responds: https://too.foo/api/health
+### 8. Expected Behavior
 
-2. **Staging Site**: https://staging.too.foo
-   - Site loads correctly
-   - SSL certificate is valid
-   - Health endpoint responds: https://staging.too.foo/api/health
+✅ **Success indicators:**
+- Backend starts without errors
+- WebSocket connects successfully
+- Particles move smoothly at 60 FPS
+- No network latency visible
+- GPU running at high utilization
+- Multiple clients can connect simultaneously
 
-3. **Monitoring Dashboard**: https://monitor.too.foo/grafana
-   - Grafana login works
-   - Prometheus datasource configured
-   - Loki datasource configured
-   - Dashboards load correctly
+❌ **Failure indicators:**
+- Connection refused errors
+- Particles not moving or updating slowly
+- Browser console shows WebSocket errors
+- Backend logs show simulation errors
+- GPU not being utilized
 
-4. **Alerts**
-   - Test alert firing
-   - Verify email notifications
-   - Verify Slack notifications (if configured)
+### 9. Performance Benchmarks
 
-5. **Backups**
-   - Verify daily backup runs
-   - Check backup logs
-   - Test restore process
+Expected performance:
+- **Backend simulation**: 500 Hz internal update rate
+- **WebSocket broadcast**: 60 FPS (16ms intervals)
+- **Frontend rendering**: 60 FPS smooth
+- **Latency**: < 50ms end-to-end
+- **Particle count**: 10K-100K depending on GPU
 
-## Performance Testing
+### 10. Cleanup
 
-```bash
-# Load test with Apache Bench
-ab -n 1000 -c 10 https://too.foo/
+To stop the backend:
+- Press `Ctrl+C` in the terminal
+- The simulation engine will stop gracefully
+- WebSocket connections will close
 
-# Monitor during load test
-docker stats
-
-# Check Prometheus metrics during load
-curl http://localhost:9090/api/v1/query?query=rate(http_requests_total[1m])
-```
-
-## Troubleshooting
-
-### Container won't start
-```bash
-# Check logs
-docker logs 404-app-blue
-docker logs 404-app-green
-
-# Check health status
-docker inspect --format='{{json .State.Health}}' 404-app-blue | jq
-```
-
-### Health checks failing
-```bash
-# Test health endpoint directly
-docker exec 404-app-blue curl http://localhost:3000/api/health
-
-# Check application logs
-docker logs 404-app-blue --tail 100
-```
-
-### Traefik not routing
-```bash
-# Check Traefik logs
-docker logs traefik --tail 100
-
-# Check Traefik dashboard
-# Access http://monitor.too.foo (if configured)
-
-# Verify labels
-docker inspect 404-app-blue | jq '.[0].Config.Labels'
-```
-
-### Monitoring not working
-```bash
-# Check Prometheus targets
-curl http://localhost:9090/api/v1/targets
-
-# Check Grafana logs
-docker logs grafana --tail 100
-
-# Verify datasources
-curl http://admin:password@localhost:3000/api/datasources
-```
-
+To test reconnection:
+- Stop backend, start it again
+- Frontend should automatically reconnect
+- Check console for reconnection messages

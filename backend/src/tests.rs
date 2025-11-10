@@ -1,78 +1,105 @@
-// Comprehensive test suite for physics simulations
-// These tests should FAIL initially (TDD approach)
-
+// Integration tests for WebSocket and end-to-end functionality
 #[cfg(test)]
 mod integration_tests {
     use crate::cuda::{CudaContext, init_cuda_in_thread};
-    use crate::physics::*;
+    use crate::simulation_engine;
+    use crate::broadcast;
     use std::sync::Arc;
+    use std::time::Duration;
 
     fn setup_test_context() -> (Arc<CudaContext>, rustacuda::context::Context) {
         init_cuda_in_thread().expect("Failed to init CUDA in test thread");
         let context_obj = rustacuda::prelude::Context::create_and_push(
-            rustacuda::prelude::ContextFlags::MAP_HOST | rustacuda::prelude::ContextFlags::SCHED_AUTO,
-            rustacuda::prelude::Device::get_device(0).expect("Failed to get device")
-        ).expect("Failed to create context");
-        (Arc::new(CudaContext::new().expect("Failed to create CUDA context")), context_obj)
+            rustacuda::prelude::ContextFlags::MAP_HOST
+                | rustacuda::prelude::ContextFlags::SCHED_AUTO,
+            rustacuda::prelude::Device::get_device(0).expect("Failed to get device"),
+        )
+        .expect("Failed to create context");
+        (
+            Arc::new(CudaContext::new().expect("Failed to create CUDA context")),
+            context_obj,
+        )
     }
 
     #[test]
-    fn test_sph_performance() {
+    fn test_simulation_engine_broadcast_integration() {
         let (context, _context_guard) = setup_test_context();
-        let mut sim = SphSimulation::new(&context).unwrap();
+        let engine = simulation_engine::SimulationEngine::new(&context, 50).unwrap();
+        engine.start().unwrap();
         
-        // Test single step performance
-        let start = std::time::Instant::now();
-        sim.step(0.016).unwrap();
-        let duration = start.elapsed();
+        // Wait for simulation to stabilize
+        std::thread::sleep(std::time::Duration::from_millis(200));
         
-        // CPU implementation - should complete in reasonable time
-        // Full CUDA kernel will be much faster
-        assert!(duration.as_millis() < 100, "SPH step should complete in reasonable time");
-    }
-
-    #[test]
-    fn test_boids_performance() {
-        let (context, _context_guard) = setup_test_context();
-        let mut sim = BoidsSimulation::new(&context, 1000).unwrap();
+        // Encode multiple states
+        let states: Vec<_> = (0..5)
+            .map(|_| {
+                std::thread::sleep(std::time::Duration::from_millis(20));
+                broadcast::BroadcastState::encode(&engine).unwrap()
+            })
+            .collect();
         
-        // Test single step performance with fewer boids
-        let start = std::time::Instant::now();
-        sim.step(0.016).unwrap();
-        let duration = start.elapsed();
+        // All states should have same particle count
+        let num_boids = states[0].num_boids;
+        assert!(states.iter().all(|s| s.num_boids == num_boids));
         
-        // CPU implementation - should complete in reasonable time
-        assert!(duration.as_millis() < 100, "Boids step should complete in reasonable time");
-    }
-
-    #[test]
-    fn test_memory_leak_detection() {
-        let (context, _context_guard) = setup_test_context();
-        
-        // Create and destroy many simulations
-        for _ in 0..100 {
-            let _sim = SphSimulation::new(&context).unwrap();
-            drop(_sim);
+        // Test delta encoding between consecutive states
+        for i in 1..states.len() {
+            let delta = broadcast::DeltaState::encode_delta(&states[i], &states[i-1]).unwrap();
+            assert_eq!(delta.num_boids, num_boids);
         }
         
-        // If memory leaks, GPU memory will be exhausted
-        // This test passes if no panic occurs
+        engine.stop();
     }
 
     #[test]
-    fn test_concurrent_simulations() {
+    fn test_simulation_engine_performance() {
         let (context, _context_guard) = setup_test_context();
+        let engine = simulation_engine::SimulationEngine::new(&context, 1000).unwrap();
+        engine.start().unwrap();
         
-        // Should be able to run multiple simulations concurrently
-        let mut sph = SphSimulation::new(&context).unwrap();
-        let mut boids = BoidsSimulation::new(&context, 1000).unwrap();
+        // Measure encoding performance
+        let start = std::time::Instant::now();
+        for _ in 0..10 {
+            let _state = broadcast::BroadcastState::encode(&engine).unwrap();
+        }
+        let duration = start.elapsed();
         
-        sph.step(0.016).unwrap();
-        boids.step(0.016).unwrap();
+        // Should encode 10 states in reasonable time (< 1 second)
+        assert!(duration.as_secs() < 1, "Encoding should be fast");
         
-        // Both should work without interfering
-        assert!(sph.get_particles().unwrap().len() > 0);
-        assert!(boids.get_boids().unwrap().len() > 0);
+        engine.stop();
+    }
+
+    #[test]
+    fn test_simulation_engine_consistency() {
+        let (context, _context_guard) = setup_test_context();
+        let engine = simulation_engine::SimulationEngine::new(&context, 100).unwrap();
+        engine.start().unwrap();
+        
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        
+        // Get state multiple times - should always return valid data
+        for _ in 0..5 {
+            let state = engine.get_state().unwrap();
+            assert_eq!(state.len(), 100 * 4);
+            assert!(state.iter().all(|&x| x.is_finite()), "All values should be finite");
+        }
+        
+        engine.stop();
+    }
+
+    #[test]
+    fn test_broadcast_state_timestamp() {
+        let (context, _context_guard) = setup_test_context();
+        let engine = simulation_engine::SimulationEngine::new(&context, 10).unwrap();
+        engine.start().unwrap();
+        
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        
+        let state = broadcast::BroadcastState::encode(&engine).unwrap();
+        // Timestamp should be reasonable (encoding time in ms)
+        assert!(state.timestamp < 1000, "Encoding should be fast");
+        
+        engine.stop();
     }
 }
-

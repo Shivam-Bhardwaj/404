@@ -2,17 +2,19 @@
 // Perfect circle rendering using SDF
 use crate::cuda::CudaContext;
 use anyhow::Result;
-use rustacuda::prelude::*;
 use rustacuda::memory::DeviceBuffer;
 use std::sync::Arc;
 
+#[allow(dead_code)]
 pub struct SdfRenderer {
+    #[allow(dead_code)]
     context: Arc<CudaContext>,
     width: usize,
     height: usize,
     output: DeviceBuffer<u8>,
 }
 
+#[allow(dead_code)]
 impl SdfRenderer {
     pub fn new(context: &Arc<CudaContext>, width: usize, height: usize) -> Result<Self> {
         // Context should already be initialized by caller

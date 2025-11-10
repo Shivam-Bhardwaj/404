@@ -9,5 +9,5 @@ pub mod sdf;
 pub use sph::SphSimulation;
 pub use boids::BoidsSimulation;
 pub use grayscott::GrayScottSimulation;
-pub use sdf::SdfRenderer;
+// pub use sdf::SdfRenderer; // Not currently used
 

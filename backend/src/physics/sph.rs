@@ -21,6 +21,7 @@ pub struct Particle {
 unsafe impl DeviceCopy for Particle {}
 
 pub struct SphSimulation {
+    #[allow(dead_code)]
     context: Arc<CudaContext>,
     num_particles: usize,
     particles: DeviceBuffer<Particle>,
@@ -98,7 +99,7 @@ impl SphSimulation {
                         1.0 - 1.5 * q2 + 0.75 * q3
                     } else if q < 2.0 {
                         let q2 = q * q;
-                        let q3 = q2 * q;
+                        let _q3 = q2 * q;
                         0.25 * (2.0 - q) * (2.0 - q) * (2.0 - q)
                     } else {
                         0.0

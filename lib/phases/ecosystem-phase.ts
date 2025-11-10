@@ -1,18 +1,9 @@
 // Biological Ecosystem with Genetic Evolution
-import { fetchBoidsSimulation, runBoidsSimulation } from '@/lib/api/physics'
+import { SimulationStream, StreamedBoidState } from '@/lib/api/streaming'
 import { AnimationPhase, Organism } from '../types'
 import { BoidsSystem } from '../biology/boids'
 import { COLORS } from '../constants'
-import { lerp } from '../utils/math'
 import { SimulationSourceTracker, SimulationSourceDetails } from '../telemetry/simulation-source'
-
-interface RemoteBoidState {
-  x: number
-  y: number
-  vx: number
-  vy: number
-  type: Organism['type']
-}
 
 export class EcosystemPhase implements AnimationPhase {
   name: 'ecosystem' = 'ecosystem'
@@ -26,18 +17,11 @@ export class EcosystemPhase implements AnimationPhase {
   private height: number
   private renderOrganisms: Organism[] = []
   
-  private remoteEnabled = true
-  private remoteOrganisms: Organism[] = []
-  private remoteState: RemoteBoidState[] = []
-  private remoteTargetState: RemoteBoidState[] | null = null
-  private remoteProgress = 1
-  private remoteFetchPending = false
-  private remoteLastSample = 0
-  private remoteFailures = 0
+  private stream: SimulationStream | null = null
+  private streamedOrganisms: Organism[] = []
   private latestStats: { total: number; predators: number; prey: number; producers: number; avgEnergy: number } | null = null
-  private readonly remoteBlendDuration = 300
-  private readonly remoteBoidCount = 180
   private sourceTracker = SimulationSourceTracker.getInstance()
+  private useStreaming = true
   
   constructor(width: number, height: number) {
     this.boids = new BoidsSystem(width, height)
@@ -48,18 +32,26 @@ export class EcosystemPhase implements AnimationPhase {
   init(): void {
     this.progress = 0
     this.isComplete = false
-    this.remoteState = []
-    this.remoteTargetState = null
-    this.remoteProgress = 1
-    this.remoteFailures = 0
-    this.remoteEnabled = true
-    this.remoteOrganisms = []
+    this.streamedOrganisms = []
+    this.renderOrganisms = []
     
     // Clear existing organisms before spawning new ones
     if (this.boids['organisms']) {
       this.boids['organisms'] = []
     }
     
+    // Try to connect to WebSocket stream
+    if (this.useStreaming) {
+      this.connectStream()
+    }
+    
+    // Fallback: Start with local organisms if streaming fails
+    if (!this.useStreaming || !this.stream) {
+      this.initLocalOrganisms()
+    }
+  }
+  
+  private initLocalOrganisms(): void {
     // Start with prey and producers
     for (let i = 0; i < 20; i++) {
       this.boids.addOrganism(
@@ -87,15 +79,131 @@ export class EcosystemPhase implements AnimationPhase {
     }
     
     this.renderOrganisms = this.boids.organisms
-    this.scheduleRemoteBoidFetch(true)
+  }
+  
+  private connectStream(): void {
+    try {
+      const stream = new SimulationStream()
+      
+      stream.onState((states: StreamedBoidState[]) => {
+        this.handleStreamedState(states)
+      })
+      
+      stream.onError((error: Error) => {
+        console.warn('WebSocket stream error:', error)
+        this.useStreaming = false
+        if (this.renderOrganisms.length === 0) {
+          this.initLocalOrganisms()
+        }
+      })
+      
+      stream.connect().then(() => {
+        this.stream = stream
+        this.reportSource('server', {
+          sampleSize: 0, // Will be updated when first state arrives
+        })
+      }).catch((error) => {
+        console.warn('Failed to connect WebSocket stream:', error)
+        this.useStreaming = false
+        this.initLocalOrganisms()
+      })
+    } catch (error) {
+      console.warn('Failed to create WebSocket stream:', error)
+      this.useStreaming = false
+      this.initLocalOrganisms()
+    }
+  }
+  
+  private handleStreamedState(states: StreamedBoidState[]): void {
+    // Ensure we have enough organisms
+    while (this.streamedOrganisms.length < states.length) {
+      const index = this.streamedOrganisms.length
+      this.streamedOrganisms.push(this.createOrganismFromState(states[index] || { x: 0, y: 0, vx: 0, vy: 0, timestamp: 0 }, index))
+    }
+    
+    // Update organisms from streamed state
+    for (let i = 0; i < states.length && i < this.streamedOrganisms.length; i++) {
+      const state = states[i]
+      const org = this.streamedOrganisms[i]
+      
+      // Scale coordinates from normalized [0,1] to canvas size
+      org.x = state.x * this.width
+      org.y = state.y * this.height
+      org.vx = state.vx * this.width
+      org.vy = state.vy * this.height
+      
+      // Update energy based on velocity
+      const speed = Math.hypot(org.vx, org.vy)
+      org.energy = Math.max(10, Math.min(org.maxEnergy, org.energy * 0.98 + speed * 0.1))
+      
+      // Update trail
+      org.trail.push({ x: org.x, y: org.y })
+      if (org.trail.length > 20) {
+        org.trail.shift()
+      }
+      
+      org.age = (org.age + 1) % org.maxAge
+    }
+    
+    // Remove excess organisms if stream sent fewer
+    if (this.streamedOrganisms.length > states.length) {
+      this.streamedOrganisms = this.streamedOrganisms.slice(0, states.length)
+    }
+    
+    this.renderOrganisms = this.streamedOrganisms
+    
+    this.reportSource('server', {
+      sampleSize: states.length,
+    })
+  }
+  
+  private createOrganismFromState(state: StreamedBoidState, index: number): Organism {
+    const type = this.boidTypeForIndex(index)
+    return {
+      id: `stream-${index}`,
+      x: state.x * this.width,
+      y: state.y * this.height,
+      vx: state.vx * this.width,
+      vy: state.vy * this.height,
+      ax: 0,
+      ay: 0,
+      radius: type === 'predator' ? 5 : type === 'prey' ? 3 : 2.5,
+      mass: 1,
+      color: this.colorForType(type),
+      life: 1,
+      maxLife: 1,
+      type,
+      energy: 60,
+      maxEnergy: 120,
+      age: 0,
+      maxAge: 1200,
+      speed: 1,
+      vision: 120,
+      reproductionCooldown: 0,
+      genes: {
+        hue: (index * 29) % 360,
+        saturation: 0.8,
+        brightness: 0.7,
+        size: 1,
+        speed: 1,
+        aggression: type === 'predator' ? 0.8 : 0.3,
+        efficiency: 0.6,
+      },
+      trail: [],
+    }
   }
   
   update(dt: number): void {
     this.progress = Math.min(1, this.progress + dt / this.duration)
     
-    if (this.remoteEnabled && (this.remoteState.length > 0 || this.remoteFetchPending)) {
-      this.updateRemoteBoids(dt)
+    if (this.useStreaming && this.stream && this.stream.isConnected()) {
+      // Using WebSocket stream - updates come via callbacks
+      // Just ensure renderOrganisms is set
+      if (this.renderOrganisms.length === 0 && this.streamedOrganisms.length > 0) {
+        this.renderOrganisms = this.streamedOrganisms
+      }
     } else {
+      // Fallback to local simulation
       this.updateLocalBoids(dt)
     }
     
@@ -143,124 +251,6 @@ export class EcosystemPhase implements AnimationPhase {
     })
   }
 
-  private updateRemoteBoids(dt: number): void {
-    if (this.remoteTargetState && this.remoteState.length > 0) {
-      this.remoteProgress = Math.min(
-        1,
-        this.remoteProgress + dt / this.remoteBlendDuration
-      )
-      const interpolated = this.interpolateRemoteBoids(
-        this.remoteState,
-        this.remoteTargetState,
-        this.remoteProgress
-      )
-      this.applyRemoteBoidSamples(interpolated)
-      
-      if (this.remoteProgress >= 1) {
-        this.remoteState = this.remoteTargetState
-        this.remoteTargetState = null
-        this.remoteLastSample = this.now()
-        this.scheduleRemoteBoidFetch()
-      }
-      return
-    }
-    
-    if (this.remoteState.length > 0) {
-      this.applyRemoteBoidSamples(this.remoteState)
-      const now = this.now()
-      if (!this.remoteFetchPending && now - this.remoteLastSample > this.remoteBlendDuration) {
-        this.scheduleRemoteBoidFetch()
-      }
-      return
-    }
-    
-    if (!this.remoteFetchPending) {
-      this.scheduleRemoteBoidFetch(true)
-      if (!this.remoteState.length) {
-        this.reportSource('local', {
-          sampleSize: this.renderOrganisms.length,
-        })
-      }
-    }
-  }
-
-  private applyRemoteBoidSamples(samples: RemoteBoidState[]): void {
-    if (!samples.length) return
-    this.ensureRemoteOrganismPool(samples.length)
-    
-    for (let i = 0; i < samples.length; i++) {
-      const sample = samples[i]
-      const organism = this.remoteOrganisms[i]
-      organism.type = sample.type
-      organism.color = this.colorForType(sample.type)
-      organism.radius = sample.type === 'predator' ? 5 : sample.type === 'prey' ? 3 : 2.5
-      organism.vx = sample.vx
-      organism.vy = sample.vy
-      organism.x = sample.x
-      organism.y = sample.y
-      organism.energy = Math.max(
-        10,
-        Math.min(
-          organism.maxEnergy,
-          organism.energy * 0.98 + Math.hypot(sample.vx, sample.vy) * 250
-        )
-      )
-      organism.age = (organism.age + 1) % organism.maxAge
-      
-      organism.trail.push({ x: organism.x, y: organism.y })
-      if (organism.trail.length > 20) {
-        organism.trail.shift()
-      }
-    }
-    
-    this.renderOrganisms = this.remoteOrganisms
-    this.reportSource('server', {
-      sampleSize: samples.length,
-    })
-  }
-
-  private ensureRemoteOrganismPool(count: number): void {
-    while (this.remoteOrganisms.length < count) {
-      this.remoteOrganisms.push(this.createRemoteOrganism(this.remoteOrganisms.length))
-    }
-  }
-
-  private createRemoteOrganism(index: number): Organism {
-    const type = this.boidTypeForIndex(index)
-    return {
-      id: `remote-${index}`,
-      x: 0,
-      y: 0,
-      vx: 0,
-      vy: 0,
-      ax: 0,
-      ay: 0,
-      radius: type === 'predator' ? 5 : type === 'prey' ? 3 : 2.5,
-      mass: 1,
-      color: this.colorForType(type),
-      life: 1,
-      maxLife: 1,
-      type,
-      energy: 60,
-      maxEnergy: 120,
-      age: 0,
-      maxAge: 1200,
-      speed: 1,
-      vision: 120,
-      reproductionCooldown: 0,
-      genes: {
-        hue: (index * 29) % 360,
-        saturation: 0.8,
-        brightness: 0.7,
-        size: 1,
-        speed: 1,
-        aggression: type === 'predator' ? 0.8 : 0.3,
-        efficiency: 0.6,
-      },
-      trail: [],
-    }
-  }
-
   private boidTypeForIndex(index: number): Organism['type'] {
     if (index % 12 === 0) return 'predator'
     if (index % 5 === 0) return 'producer'
@@ -272,104 +262,6 @@ export class EcosystemPhase implements AnimationPhase {
     if (type === 'producer') return COLORS.success
     if (type === 'prey') return COLORS.warning
     return COLORS.info
-  }
-
-  private interpolateRemoteBoids(
-    from: RemoteBoidState[],
-    to: RemoteBoidState[],
-    t: number
-  ): RemoteBoidState[] {
-    const length = Math.min(from.length, to.length)
-    const result: RemoteBoidState[] = []
-    
-    for (let i = 0; i < length; i++) {
-      result.push({
-        x: lerp(from[i].x, to[i].x, t),
-        y: lerp(from[i].y, to[i].y, t),
-        vx: lerp(from[i].vx, to[i].vx, t),
-        vy: lerp(from[i].vy, to[i].vy, t),
-        type: to[i].type,
-      })
-    }
-    
-    return result
-  }
-
-  private scheduleRemoteBoidFetch(prime = false): void {
-    if (this.remoteFetchPending || !this.remoteEnabled) return
-    this.remoteFetchPending = true
-    this.fetchRemoteBoids(prime)
-      .catch((error) => {
-        console.warn('Remote boids request failed', error)
-      })
-      .finally(() => {
-        this.remoteFetchPending = false
-      })
-  }
-
-  private async fetchRemoteBoids(prime: boolean): Promise<void> {
-    try {
-      const requestStarted = this.now()
-      const run = await runBoidsSimulation({
-        steps: prime ? 12 : 6,
-        numParticles: this.remoteBoidCount,
-      })
-      const samples = this.transformRemoteBoids(run.data)
-      const networkLatency = this.now() - requestStarted
-      if (!samples.length) {
-        throw new Error('Empty boids payload')
-      }
-      // Report accelerator if present
-      const accel = run.metadata?.accelerator as 'cpu' | 'cuda' | undefined
-      this.reportSource('server', {
-        accelerator: accel,
-        latencyMs: run.metadata?.computation_time_ms,
-        roundTripMs: networkLatency,
-        sampleSize: run.metadata?.num_particles ?? samples.length,
-      })
-      
-      if (prime || this.remoteState.length === 0) {
-        this.remoteState = samples
-        this.applyRemoteBoidSamples(samples)
-        this.remoteLastSample = this.now()
-      } else {
-        this.remoteTargetState = samples
-        this.remoteProgress = 0
-      }
-      
-      this.remoteFailures = 0
-      this.remoteEnabled = true
-    } catch (error) {
-      this.remoteFailures++
-      if (this.remoteFailures >= 3) {
-        this.remoteEnabled = false
-        this.remoteState = []
-        this.remoteTargetState = null
-        this.reportSource('local', {
-          sampleSize: this.renderOrganisms.length,
-        })
-      }
-      throw error
-    }
-  }
-
-  private transformRemoteBoids(data: number[]): RemoteBoidState[] {
-    const result: RemoteBoidState[] = []
-    const width = this.width
-    const height = this.height
-    
-    for (let i = 0; i + 3 < data.length; i += 4) {
-      const index = i / 4
-      result.push({
-        x: data[i] * width,
-        y: data[i + 1] * height,
-        vx: data[i + 2] * width,
-        vy: data[i + 3] * height,
-        type: this.boidTypeForIndex(index),
-      })
-    }
-    
-    return result
   }
 
   private computeStats(organisms: Organism[]) {
@@ -396,10 +288,6 @@ export class EcosystemPhase implements AnimationPhase {
     }
     
     return stats
-  }
-
-  private now(): number {
-    return typeof performance !== 'undefined' ? performance.now() : Date.now()
   }
   
   private reportSource(mode: 'server' | 'local', details?: SimulationSourceDetails): void {
@@ -481,14 +369,21 @@ export class EcosystemPhase implements AnimationPhase {
     return this.latestStats
   }
   
+  private reportSource(mode: 'server' | 'local', details?: SimulationSourceDetails): void {
+    this.sourceTracker.update(this.name, mode, details)
+  }
+  
   cleanup(): void {
+    // Disconnect WebSocket stream
+    if (this.stream) {
+      this.stream.disconnect()
+      this.stream = null
+    }
+    
     // Clear all organisms to prevent memory leaks
     this.boids.organisms = []
     this.renderOrganisms = []
-    this.remoteOrganisms = []
-    this.remoteState = []
-    this.remoteTargetState = null
-    this.remoteFetchPending = false
+    this.streamedOrganisms = []
     
     // Clear trails if they exist
     if (this.boids['organisms']) {
