@@ -1,7 +1,8 @@
-// Circle Closing Animation with Signed Distance Fields
+// Black Circle Expanding Animation - Reveals Ecosystem
 import { AnimationPhase } from '../types'
 import { COLORS } from '../constants'
 import { lerp } from '../utils/math'
+import { EcosystemPhase } from './ecosystem-phase'
 
 export class CirclePhase implements AnimationPhase {
   name: 'circle' = 'circle'
@@ -12,20 +13,33 @@ export class CirclePhase implements AnimationPhase {
   private centerX = 0
   private centerY = 0
   private maxRadius = 0
+  private ecosystemPhase: EcosystemPhase | null = null
   
-  constructor(width: number, height: number) {
+  constructor(width: number, height: number, ecosystemPhase?: EcosystemPhase) {
     this.centerX = width / 2
     this.centerY = height / 2
-    this.maxRadius = Math.max(width, height) * 0.7
+    // Calculate max radius to cover entire screen (diagonal)
+    this.maxRadius = Math.sqrt(width * width + height * height) / 2
+    this.ecosystemPhase = ecosystemPhase || null
   }
   
   init(): void {
     this.progress = 0
     this.isComplete = false
+    
+    // Initialize ecosystem phase if provided so it's ready to render
+    if (this.ecosystemPhase) {
+      this.ecosystemPhase.init()
+    }
   }
   
   update(dt: number): void {
     this.progress = Math.min(1, this.progress + dt / this.duration)
+    
+    // Update ecosystem phase so it animates while being revealed
+    if (this.ecosystemPhase) {
+      this.ecosystemPhase.update(dt)
+    }
     
     if (this.progress >= 1) {
       this.isComplete = true
@@ -43,33 +57,42 @@ export class CirclePhase implements AnimationPhase {
     const width = ctx.canvas.width
     const height = ctx.canvas.height
     
-    // Easing function for smooth closing
-    const easeInOut = (t: number) => t < 0.5
-      ? 2 * t * t
-      : 1 - Math.pow(-2 * t + 2, 2) / 2
+    // First, render the ecosystem phase underneath if available
+    if (this.ecosystemPhase) {
+      this.ecosystemPhase.render(ctx)
+    }
     
-    const easedProgress = easeInOut(this.progress)
-    const currentRadius = lerp(this.maxRadius, 0, easedProgress)
+    // Easing function for smooth expansion
+    const easeOut = (t: number) => 1 - Math.pow(1 - t, 3)
     
-    // Fill background
+    const easedProgress = easeOut(this.progress)
+    // Circle expands from 0 to maxRadius
+    const currentRadius = lerp(0, this.maxRadius, easedProgress)
+    
+    // Draw black expanding circle mask on top
+    // Fill entire screen with black first
     ctx.fillStyle = COLORS.black
     ctx.fillRect(0, 0, width, height)
     
-    // Draw circle with SDF for perfect anti-aliasing
+    // Then use destination-out to erase the expanding circle, revealing ecosystem underneath
+    ctx.save()
+    ctx.globalCompositeOperation = 'destination-out'
+    
+    // Draw expanding circle with SDF for perfect anti-aliasing
     const imageData = ctx.createImageData(width, height)
     const data = imageData.data
     
-    // Sample step for performance (can be 1 for best quality)
+    // Sample step for performance
     const step = 2
     
     for (let y = 0; y < height; y += step) {
       for (let x = 0; x < width; x += step) {
         const dist = this.circleSDF(x, y, this.centerX, this.centerY, currentRadius)
         
-        // Smooth alpha based on distance
-        let alpha = 0
+        // Alpha: 255 (fully erase) inside circle, 0 (keep) outside circle
+        let alpha = 0 // Default to keep (don't erase)
         if (dist <= 0) {
-          alpha = 255 // Inside circle
+          alpha = 255 // Inside circle - fully erase (reveals ecosystem)
         } else if (dist < 2) {
           // Anti-aliasing at edge
           alpha = Math.floor((1 - dist / 2) * 255)
@@ -82,10 +105,10 @@ export class CirclePhase implements AnimationPhase {
             const py = y + dy
             if (px < width && py < height) {
               const idx = (py * width + px) * 4
-              data[idx] = 255     // R
-              data[idx + 1] = 255 // G
-              data[idx + 2] = 255 // B
-              data[idx + 3] = alpha
+              data[idx] = 0       // R (not used for destination-out)
+              data[idx + 1] = 0   // G (not used for destination-out)
+              data[idx + 2] = 0   // B (not used for destination-out)
+              data[idx + 3] = alpha // A (controls erasure)
             }
           }
         }
@@ -93,19 +116,7 @@ export class CirclePhase implements AnimationPhase {
     }
     
     ctx.putImageData(imageData, 0, 0)
-    
-    // Add glow effect
-    if (currentRadius > 10) {
-      ctx.globalAlpha = 0.3
-      ctx.fillStyle = COLORS.white
-      ctx.shadowColor = COLORS.white
-      ctx.shadowBlur = 30
-      ctx.beginPath()
-      ctx.arc(this.centerX, this.centerY, currentRadius, 0, Math.PI * 2)
-      ctx.fill()
-      ctx.shadowBlur = 0
-      ctx.globalAlpha = 1
-    }
+    ctx.restore()
   }
   
   cleanup(): void {

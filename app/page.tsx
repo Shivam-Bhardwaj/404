@@ -4,7 +4,6 @@ import { useEffect, useRef, useState } from 'react'
 import { TypingPhase } from '@/lib/phases/typing-phase'
 import { WhitePhase } from '@/lib/phases/white-phase'
 import { CirclePhase } from '@/lib/phases/circle-phase'
-import { ExplosionPhase } from '@/lib/phases/explosion-phase'
 import { EcosystemPhase } from '@/lib/phases/ecosystem-phase'
 import { PhaseManager } from '@/lib/phases/phase-manager'
 import { HardwareDetector } from '@/lib/hardware/detection'
@@ -78,9 +77,9 @@ export default function Error404() {
     
     phases.set('typing', new TypingPhase())
     phases.set('white', new WhitePhase())
-    phases.set('circle', new CirclePhase(canvas.width, canvas.height))
-    phases.set('explosion', new ExplosionPhase(canvas.width, canvas.height, canvas))
-    phases.set('ecosystem', new EcosystemPhase(canvas.width, canvas.height))
+    const ecosystemPhase = new EcosystemPhase(canvas.width, canvas.height)
+    phases.set('ecosystem', ecosystemPhase)
+    phases.set('circle', new CirclePhase(canvas.width, canvas.height, ecosystemPhase))
     
     // Initialize memory manager and register cleanup callbacks
     const memoryManager = MemoryManager.getInstance()
@@ -113,7 +112,6 @@ export default function Error404() {
       'typing',
       'white',
       'circle',
-      'explosion',
       'ecosystem',
     ]
     
@@ -224,11 +222,6 @@ export default function Error404() {
       canvas.width = window.innerWidth
       canvas.height = window.innerHeight
       
-      // Resize WebGL renderer if explosion phase exists (it uses WebGL)
-      const explosionPhase = phases.get('explosion') as ExplosionPhase
-      if (explosionPhase && (explosionPhase as any).webglRenderer) {
-        (explosionPhase as any).webglRenderer.resize()
-      }
     }
     window.addEventListener('resize', handleResize)
     
