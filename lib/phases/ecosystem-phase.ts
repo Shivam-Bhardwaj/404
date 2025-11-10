@@ -369,10 +369,6 @@ export class EcosystemPhase implements AnimationPhase {
     return this.latestStats
   }
   
-  private reportSource(mode: 'server' | 'local', details?: SimulationSourceDetails): void {
-    this.sourceTracker.update(this.name, mode, details)
-  }
-  
   cleanup(): void {
     // Disconnect WebSocket stream
     if (this.stream) {
