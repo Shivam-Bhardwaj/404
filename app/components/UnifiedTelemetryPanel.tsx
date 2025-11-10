@@ -231,8 +231,7 @@ export function UnifiedTelemetryPanel({ performance, physics, ecosystemStats }: 
                   <span className="text-green-400 font-bold">SERVER</span>
                   {accelerator && (
                     <span className={
-                      accelerator === 'cuda' ? 'text-blue-400' :
-                      accelerator === 'gpu' ? 'text-purple-400' : 'text-yellow-400'
+                      accelerator === 'cuda' ? 'text-blue-400' : 'text-yellow-400'
                     }>
                       ({accelerator.toUpperCase()})
                     </span>
