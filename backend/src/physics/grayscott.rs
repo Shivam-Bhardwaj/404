@@ -4,9 +4,11 @@ use crate::cuda::CudaContext;
 use anyhow::Result;
 use rustacuda::prelude::*;
 use rustacuda::memory::DeviceBuffer;
+use rustacuda::launch;
+use rustacuda::function::Function;
 use std::ffi::CString;
 #[cfg(feature = "cuda-kernel")]
-use nvrtc::Program;
+use nvrtc::NvrtcProgram;
 use std::sync::Arc;
 
 pub struct GrayScottSimulation {
@@ -22,13 +24,9 @@ pub struct GrayScottSimulation {
     dv: f32,  // Diffusion rate for v
     f: f32,   // Feed rate
     k: f32,   // Kill rate
-    // CUDA kernel module/function
+    // CUDA kernel PTX code
     #[cfg(feature = "cuda-kernel")]
-    module: Module,
-    #[cfg(feature = "cuda-kernel")]
-    func: Function<'static>,
-    #[cfg(feature = "cuda-kernel")]
-    stream: Stream,
+    ptx: String,
 }
 
 impl GrayScottSimulation {
@@ -124,26 +122,14 @@ impl GrayScottSimulation {
         "#;
 
         #[cfg(feature = "cuda-kernel")]
-        let prog = Program::new(src).map_err(|e| anyhow::anyhow!("NVRTC program error: {:?}", e))?;
-        #[cfg(feature = "cuda-kernel")]
-        prog.compile(&[])
-            .map_err(|e| anyhow::anyhow!("NVRTC compile error: {:?}", e))?;
-        #[cfg(feature = "cuda-kernel")]
-        let ptx = prog.get_ptx().map_err(|e| anyhow::anyhow!("NVRTC get_ptx error: {:?}", e))?;
-
-        // Load module and get function
-        #[cfg(feature = "cuda-kernel")]
-        let ptx_c = CString::new(ptx).unwrap();
-        #[cfg(feature = "cuda-kernel")]
-        let module = Module::load_from_string(&ptx_c)
-            .map_err(|e| anyhow::anyhow!("Failed to load PTX module: {:?}", e))?;
-        #[cfg(feature = "cuda-kernel")]
-        let func = module.get_function(&CString::new("gray_scott_step").unwrap())
-            .map_err(|e| anyhow::anyhow!("Failed to get kernel function: {:?}", e))?;
-
-        #[cfg(feature = "cuda-kernel")]
-        let stream = Stream::new(StreamFlags::DEFAULT, None)
-            .map_err(|e| anyhow::anyhow!("Failed to create stream: {:?}", e))?;
+        let ptx = {
+            let prog = NvrtcProgram::new(src, None, &[], &[])
+                .map_err(|e| anyhow::anyhow!("NVRTC program error: {:?}", e))?;
+            prog.compile(&[])
+                .map_err(|e| anyhow::anyhow!("NVRTC compile error: {:?}", e))?;
+            prog.get_ptx()
+                .map_err(|e| anyhow::anyhow!("NVRTC get_ptx error: {:?}", e))?
+        };
 
         Ok(Self {
             context: Arc::clone(context),
@@ -158,11 +144,7 @@ impl GrayScottSimulation {
             f: 0.055,
             k: 0.062,
             #[cfg(feature = "cuda-kernel")]
-            module,
-            #[cfg(feature = "cuda-kernel")]
-            func,
-            #[cfg(feature = "cuda-kernel")]
-            stream,
+            ptx,
         })
     }
 
@@ -194,9 +176,18 @@ impl GrayScottSimulation {
 
         #[cfg(feature = "cuda-kernel")]
         {
+            // Load module and function fresh each time
+            let ptx_c = CString::new(self.ptx.as_str()).unwrap();
+            let module = Module::load_from_string(&ptx_c)
+                .map_err(|e| anyhow::anyhow!("Failed to load PTX module: {:?}", e))?;
+            let func = module.get_function(&CString::new("gray_scott_step").unwrap())
+                .map_err(|e| anyhow::anyhow!("Failed to get kernel function: {:?}", e))?;
+            let stream = Stream::new(StreamFlags::DEFAULT, None)
+                .map_err(|e| anyhow::anyhow!("Failed to create stream: {:?}", e))?;
+            
             unsafe {
                 launch!(
-                    self.func<<<grid, block, 0, self.stream>>>(
+                    func<<<grid, block, 0, stream>>>(
                         width_i32, height_i32, du, dv, f, k, dt,
                         self.u_field.as_device_ptr(),
                         self.v_field.as_device_ptr(),
@@ -206,7 +197,7 @@ impl GrayScottSimulation {
                 )
                 .map_err(|e| anyhow::anyhow!("Kernel launch failed: {:?}", e))?;
             }
-            self.stream.synchronize()
+            stream.synchronize()
                 .map_err(|e| anyhow::anyhow!("Stream sync failed: {:?}", e))?;
             std::mem::swap(&mut self.u_field, &mut self.u_temp);
             std::mem::swap(&mut self.v_field, &mut self.v_temp);

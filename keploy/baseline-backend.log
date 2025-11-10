@@ -1,0 +1,98 @@
+warning: physics-backend@0.1.0: nvcc failed to compile boids kernel; CPU fallback will be used
+   Compiling physics-backend v0.1.0 (/404-public/repo-keploy/backend)
+warning: unused import: `std::ffi::CString`
+ --> src/physics/grayscott.rs:7:5
+  |
+7 | use std::ffi::CString;
+  |     ^^^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `rustacuda::prelude::*`
+ --> src/physics/sdf.rs:5:5
+  |
+5 | use rustacuda::prelude::*;
+  |     ^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `sdf::SdfRenderer`
+  --> src/physics/mod.rs:12:9
+   |
+12 | pub use sdf::SdfRenderer;
+   |         ^^^^^^^^^^^^^^^^
+
+warning: unused variable: `q3`
+   --> src/physics/sph.rs:101:29
+    |
+101 |                         let q3 = q2 * q;
+    |                             ^^ help: if this is intentional, prefix it with an underscore: `_q3`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: fields `simulation_type` and `num_particles` are never read
+  --> src/main.rs:27:5
+   |
+26 | struct SimulationRequest {
+   |        ----------------- fields in this struct
+27 |     simulation_type: String,
+   |     ^^^^^^^^^^^^^^^
+28 |     num_particles: Option<usize>,
+   |     ^^^^^^^^^^^^^
+   |
+   = note: `SimulationRequest` has a derived impl for the trait `Debug`, but this is intentionally ignored during dead code analysis
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: method `ensure_context` is never used
+  --> src/cuda.rs:37:12
+   |
+13 | impl CudaContext {
+   | ---------------- method in this implementation
+...
+37 |     pub fn ensure_context(&self) -> Result<()> {
+   |            ^^^^^^^^^^^^^^
+
+warning: field `context` is never read
+  --> src/physics/sph.rs:24:5
+   |
+23 | pub struct SphSimulation {
+   |            ------------- field in this struct
+24 |     context: Arc<CudaContext>,
+   |     ^^^^^^^
+
+warning: field `context` is never read
+  --> src/physics/boids.rs:24:5
+   |
+23 | pub struct BoidsSimulation {
+   |            --------------- field in this struct
+24 |     context: Arc<CudaContext>,
+   |     ^^^^^^^
+
+warning: fields `context`, `u_temp`, and `v_temp` are never read
+  --> src/physics/grayscott.rs:13:5
+   |
+12 | pub struct GrayScottSimulation {
+   |            ------------------- fields in this struct
+13 |     context: Arc<CudaContext>,
+   |     ^^^^^^^
+...
+18 |     u_temp: DeviceBuffer<f32>,    // Temporary buffer for u
+   |     ^^^^^^
+19 |     v_temp: DeviceBuffer<f32>,   // Temporary buffer for v
+   |     ^^^^^^
+
+warning: struct `SdfRenderer` is never constructed
+ --> src/physics/sdf.rs:9:12
+  |
+9 | pub struct SdfRenderer {
+  |            ^^^^^^^^^^^
+
+warning: associated items `new` and `render` are never used
+  --> src/physics/sdf.rs:17:12
+   |
+16 | impl SdfRenderer {
+   | ---------------- associated items in this implementation
+17 |     pub fn new(context: &Arc<CudaContext>, width: usize, height: usize) -> Result<Self> {
+   |            ^^^
+...
+35 |     pub fn render(&self, _sdf_function: &str) -> Result<Vec<u8>> {
+   |            ^^^^^^
+

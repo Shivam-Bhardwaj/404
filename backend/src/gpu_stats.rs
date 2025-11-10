@@ -3,7 +3,7 @@
 use anyhow::{Context, Result};
 use rustacuda::prelude::*;
 use serde::Serialize;
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 #[derive(Serialize, Clone)]

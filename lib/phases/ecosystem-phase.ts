@@ -34,6 +34,7 @@ export class EcosystemPhase implements AnimationPhase {
   private remoteFetchPending = false
   private remoteLastSample = 0
   private remoteFailures = 0
+  private latestStats: { total: number; predators: number; prey: number; producers: number; avgEnergy: number } | null = null
   private readonly remoteBlendDuration = 300
   private readonly remoteBoidCount = 180
   private sourceTracker = SimulationSourceTracker.getInstance()
@@ -470,27 +471,14 @@ export class EcosystemPhase implements AnimationPhase {
     ctx.globalAlpha = 1
     ctx.shadowBlur = 0
     
-    // Draw stats
+    // Store stats for external access - don't draw them on canvas anymore
     const stats = this.computeStats(organisms)
-    ctx.fillStyle = COLORS.white
-    ctx.font = '12px monospace'
-    ctx.textAlign = 'left'
-    
-    let yPos = 20
-    const xPos = 10
-    ctx.fillText(`Total: ${stats.total}`, xPos, yPos)
-    yPos += 15
-    ctx.fillStyle = COLORS.error
-    ctx.fillText(`Predators: ${stats.predators}`, xPos, yPos)
-    yPos += 15
-    ctx.fillStyle = COLORS.warning
-    ctx.fillText(`Prey: ${stats.prey}`, xPos, yPos)
-    yPos += 15
-    ctx.fillStyle = COLORS.success
-    ctx.fillText(`Producers: ${stats.producers}`, xPos, yPos)
-    yPos += 15
-    ctx.fillStyle = COLORS.info
-    ctx.fillText(`Avg Energy: ${stats.avgEnergy.toFixed(1)}`, xPos, yPos)
+    this.latestStats = stats
+    // Stats are now displayed in the unified telemetry panel at the bottom of the page
+  }
+
+  getStats() {
+    return this.latestStats
   }
   
   cleanup(): void {

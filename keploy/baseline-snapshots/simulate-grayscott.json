@@ -1,0 +1,11 @@
+{
+  "success": true,
+  "data": [0.12, 0.11, 0.09, 0.08],
+  "metadata": {
+    "simulation_type": "grayscott",
+    "num_particles": 262144,
+    "computation_time_ms": 153,
+    "accelerator": "cpu"
+  },
+  "error": null
+}
