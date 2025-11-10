@@ -17,6 +17,8 @@ pub struct SimulationEngine {
     // Performance tracking
     frame_times: Arc<Mutex<Vec<Duration>>>, // Track last N frame times
     consecutive_delays: Arc<Mutex<u32>>, // Count consecutive frames that exceeded target
+    // Cached state for broadcasting (updated by simulation thread, read by broadcast thread)
+    cached_state: Arc<Mutex<Vec<f32>>>,
 }
 
 impl SimulationEngine {
@@ -36,6 +38,7 @@ impl SimulationEngine {
             frame_count: Arc::new(Mutex::new(0)),
             frame_times: Arc::new(Mutex::new(Vec::new())),
             consecutive_delays: Arc::new(Mutex::new(0)),
+            cached_state: Arc::new(Mutex::new(Vec::new())),
         })
     }
     
@@ -61,6 +64,7 @@ impl SimulationEngine {
         let frame_count = Arc::clone(&self.frame_count);
         let frame_times = Arc::clone(&self.frame_times);
         let consecutive_delays = Arc::clone(&self.consecutive_delays);
+        let cached_state = Arc::clone(&self.cached_state);
         
         // Spawn simulation loop in background thread
         std::thread::spawn(move || {
@@ -118,6 +122,25 @@ impl SimulationEngine {
                 
                 if let Err(e) = step_result {
                     warn!("Simulation step error: {:?}", e);
+                } else {
+                    // Update cached state for broadcasting (in simulation thread with CUDA context)
+                    // This avoids CUDA context issues in the broadcast thread
+                    match {
+                        let mut sim = simulation.lock().unwrap();
+                        sim.get_boids()
+                    } {
+                        Ok(state) => {
+                            let mut cached = cached_state.lock().unwrap();
+                            *cached = state;
+                        }
+                        Err(e) => {
+                            // Log but don't fail - cached state will be empty until next successful update
+                            let count = *frame_count.lock().unwrap();
+                            if count % 1000 == 0 {
+                                warn!("Failed to cache simulation state: {:?}", e);
+                            }
+                        }
+                    }
                 }
                 
                 // Update frame tracking
@@ -201,25 +224,13 @@ impl SimulationEngine {
     }
     
     pub fn get_state(&self) -> Result<Vec<f32>> {
-        // Ensure CUDA context is available in current thread
-        // Retry logic for async tasks that might run on different threads
-        let mut retries = 3;
-        loop {
-            match self.context.ensure_context() {
-                Ok(_) => break,
-                Err(e) => {
-                    retries -= 1;
-                    if retries == 0 {
-                        return Err(anyhow::anyhow!("Failed to ensure CUDA context after retries: {:?}", e));
-                    }
-                    // Brief delay before retry
-                    std::thread::sleep(std::time::Duration::from_millis(1));
-                }
-            }
+        // Read from cached state (updated by simulation thread)
+        // This avoids CUDA context issues when called from broadcast thread
+        let cached = self.cached_state.lock().unwrap();
+        if cached.is_empty() {
+            return Err(anyhow::anyhow!("Cached state not yet available (simulation may not have started)"));
         }
-        
-        let mut sim = self.simulation.lock().unwrap();
-        sim.get_boids()
+        Ok(cached.clone())
     }
     
     pub fn num_boids(&self) -> usize {
