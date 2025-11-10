@@ -2,7 +2,6 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { TypingPhase } from '@/lib/phases/typing-phase'
-import { ChemicalPhase } from '@/lib/phases/chemical-phase'
 import { WhitePhase } from '@/lib/phases/white-phase'
 import { CirclePhase } from '@/lib/phases/circle-phase'
 import { ExplosionPhase } from '@/lib/phases/explosion-phase'
@@ -78,7 +77,6 @@ export default function Error404() {
     const phases = new Map<PhaseType, AnimationPhase>()
     
     phases.set('typing', new TypingPhase())
-    phases.set('chemical', new ChemicalPhase(canvas))
     phases.set('white', new WhitePhase())
     phases.set('circle', new CirclePhase(canvas.width, canvas.height))
     phases.set('explosion', new ExplosionPhase(canvas.width, canvas.height, canvas))
@@ -113,7 +111,6 @@ export default function Error404() {
     // Create phase sequence with looping
     const sequence: PhaseType[] = [
       'typing',
-      'chemical',
       'white',
       'circle',
       'explosion',

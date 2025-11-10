@@ -422,6 +422,10 @@ impl BoidsSimulation {
             self.aos_dirty = false;
             return Ok(());
         }
+        
+        // Ensure CUDA context is set up before accessing device memory
+        self.context.ensure_context()?;
+        
         if let (Some(dx), Some(dy), Some(dvx), Some(dvy), Some(dspecies)) = (
             self.d_x.as_ref(),
             self.d_y.as_ref(),
@@ -457,6 +461,9 @@ impl BoidsSimulation {
     }
 
     pub fn get_boids(&mut self) -> Result<Vec<f32>> {
+        // Ensure CUDA context is set up in current thread before accessing device memory
+        self.context.ensure_context()?;
+        
         self.ensure_aos_current()?;
         let host_boids = &mut self.host_buffers.boids;
         self.boids
