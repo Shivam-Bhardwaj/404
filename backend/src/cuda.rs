@@ -3,6 +3,7 @@ use anyhow::{Context as AnyhowContext, Result};
 use rustacuda::prelude::*;
 use std::sync::Arc;
 use std::sync::Mutex;
+use tracing::warn;
 
 pub struct CudaContext {
     device: Arc<Device>,
