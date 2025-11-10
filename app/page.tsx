@@ -224,10 +224,10 @@ export default function Error404() {
       canvas.width = window.innerWidth
       canvas.height = window.innerHeight
       
-      // Resize WebGL renderer if chemical phase exists
-      const chemicalPhase = phases.get('chemical') as ChemicalPhase
-      if (chemicalPhase && (chemicalPhase as any).webglRenderer) {
-        (chemicalPhase as any).webglRenderer.resize()
+      // Resize WebGL renderer if explosion phase exists (it uses WebGL)
+      const explosionPhase = phases.get('explosion') as ExplosionPhase
+      if (explosionPhase && (explosionPhase as any).webglRenderer) {
+        (explosionPhase as any).webglRenderer.resize()
       }
     }
     window.addEventListener('resize', handleResize)
