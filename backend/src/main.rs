@@ -68,8 +68,12 @@ async fn websocket_handler(
 ) -> axum::response::Response {
     let rx = state.broadcast_tx.subscribe();
     
+    info!("New WebSocket connection request");
+    
     ws.on_upgrade(|socket| async move {
+        info!("WebSocket connection upgraded");
         handle_websocket(socket, rx).await;
+        info!("WebSocket connection closed");
     })
 }
 
@@ -85,6 +89,8 @@ async fn handle_websocket(
     // Spawn task to send simulation updates
     let send_task = tokio::spawn(async move {
         let mut interval = tokio::time::interval(std::time::Duration::from_millis(16)); // ~60 FPS
+        let mut last_successful_send = std::time::Instant::now();
+        let mut consecutive_empty = 0;
         
         loop {
             tokio::select! {
@@ -98,26 +104,57 @@ async fn handle_websocket(
                             message.extend_from_slice(&state.data);
                             
                             if sender.send(Message::Binary(message)).await.is_err() {
+                                warn!("Failed to send WebSocket message, connection closed");
                                 break;
                             }
+                            last_successful_send = std::time::Instant::now();
+                            consecutive_empty = 0;
                         }
                         Err(tokio_broadcast::error::TryRecvError::Empty) => {
-                            // No new data, continue
+                            consecutive_empty += 1;
+                            // If no data for too long, send a keepalive ping
+                            if consecutive_empty > 60 && last_successful_send.elapsed().as_secs() > 1 {
+                                // Send a ping to keep connection alive
+                                if sender.send(Message::Ping(vec![])).await.is_err() {
+                                    warn!("Failed to send WebSocket ping, connection closed");
+                                    break;
+                                }
+                                consecutive_empty = 0;
+                            }
                         }
-                        Err(_) => {
-                            // Channel closed
+                        Err(tokio_broadcast::error::TryRecvError::Closed) => {
+                            warn!("Broadcast channel closed");
+                            break;
+                        }
+                        Err(e) => {
+                            warn!("Broadcast receive error: {:?}", e);
                             break;
                         }
                     }
                 }
                 result = receiver.next() => {
                     match result {
-                        Some(Ok(Message::Close(_))) => break,
-                        Some(Ok(_)) => {
-                            // Ignore incoming messages (read-only)
+                        Some(Ok(Message::Close(_))) => {
+                            info!("WebSocket client closed connection");
+                            break;
                         }
-                        Some(Err(_)) => break,
-                        None => break,
+                        Some(Ok(Message::Ping(data))) => {
+                            // Respond to ping with pong
+                            if sender.send(Message::Pong(data)).await.is_err() {
+                                break;
+                            }
+                        }
+                        Some(Ok(_)) => {
+                            // Ignore other incoming messages (read-only)
+                        }
+                        Some(Err(e)) => {
+                            warn!("WebSocket receive error: {:?}", e);
+                            break;
+                        }
+                        None => {
+                            info!("WebSocket receiver closed");
+                            break;
+                        }
                     }
                 }
             }
@@ -345,6 +382,8 @@ async fn main() -> anyhow::Result<()> {
         }
         
         let mut interval = tokio::time::interval(std::time::Duration::from_millis(16)); // 60 FPS broadcast
+        let mut consecutive_failures = 0;
+        let mut last_success = std::time::Instant::now();
         
         loop {
             interval.tick().await;
@@ -353,9 +392,12 @@ async fn main() -> anyhow::Result<()> {
                 Ok(state) => {
                     // Send to all subscribers (non-blocking)
                     let _ = tx_clone.send(state);
+                    consecutive_failures = 0;
+                    last_success = std::time::Instant::now();
                 }
                 Err(e) => {
-                    // If we get InvalidContext error, try to reinitialize CUDA
+                    consecutive_failures += 1;
+                    // If we get InvalidContext error, try to reinitialize CUDA context
                     let error_str = format!("{:?}", e);
                     if error_str.contains("InvalidContext") || error_str.contains("context") {
                         // Try to reinitialize CUDA context
@@ -363,7 +405,16 @@ async fn main() -> anyhow::Result<()> {
                             warn!("Failed to reinitialize CUDA context: {:?}", init_err);
                         }
                     }
-                    warn!("Failed to encode broadcast state: {:?}", e);
+                    
+                    // If encoding fails repeatedly, log warning
+                    if consecutive_failures % 100 == 0 {
+                        warn!("Failed to encode broadcast state ({} consecutive failures): {:?}", consecutive_failures, e);
+                    }
+                    
+                    // If we haven't had a success in 5 seconds, something is seriously wrong
+                    if last_success.elapsed().as_secs() > 5 {
+                        warn!("No successful broadcasts for 5 seconds, simulation may be stuck");
+                    }
                 }
             }
         }
