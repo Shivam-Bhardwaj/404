@@ -13,8 +13,7 @@ import { PerformanceMonitor } from '@/lib/telemetry/monitor'
 import { AdaptiveQualityScaler } from '@/lib/performance/adaptive-quality'
 import { MemoryManager, MemoryStats, MemoryEvent, MemorySample } from '@/lib/performance/memory-manager'
 import { PhaseType, DeviceTier, AnimationPhase } from '@/lib/types'
-import { TechStackDisplay } from './components/TechStack'
-import { TelemetryDashboard } from './components/TelemetryDashboard'
+import { UnifiedTelemetryPanel } from './components/UnifiedTelemetryPanel'
 import { SimulationSourceTracker, SimulationSourceStatus } from '@/lib/telemetry/simulation-source'
 
 export default function Error404() {
@@ -35,6 +34,13 @@ export default function Error404() {
   const qualityScalerRef = useRef<AdaptiveQualityScaler | null>(null)
   const memoryManagerRef = useRef<MemoryManager | null>(null)
   const [simulationSources, setSimulationSources] = useState<Partial<Record<PhaseType, SimulationSourceStatus>>>({})
+  const [ecosystemStats, setEcosystemStats] = useState<{
+    total: number
+    predators: number
+    prey: number
+    producers: number
+    avgEnergy: number
+  } | undefined>(undefined)
   
   useEffect(() => {
     const canvas = canvasRef.current
@@ -181,6 +187,17 @@ export default function Error404() {
         if (loop !== loopCount) {
           setLoopCount(loop)
         }
+
+        // Get ecosystem stats if in ecosystem phase
+        if (currentPhaseType === 'ecosystem') {
+          const ecosystemPhase = phases.get('ecosystem') as EcosystemPhase
+          if (ecosystemPhase && 'getStats' in ecosystemPhase) {
+            const stats = (ecosystemPhase as any).getStats()
+            setEcosystemStats(stats || undefined)
+          }
+        } else {
+          setEcosystemStats(undefined)
+        }
       }
       
       animationRef.current = requestAnimationFrame(animate)
@@ -257,14 +274,13 @@ export default function Error404() {
         className="absolute inset-0 w-full h-full"
       />
       
-      {/* Combined Telemetry Panel at Bottom */}
-      {/* 404 Message - Bottom Left */}
-      <div className="fixed bottom-4 left-4 text-red-500 font-mono text-sm opacity-70 z-50">
+      {/* 404 Message - TOP CENTER */}
+      <div className="fixed top-4 left-1/2 transform -translate-x-1/2 text-red-500 font-mono text-lg font-bold opacity-90 z-50 tracking-wide">
         ERROR 404: The page you seek has evolved beyond existence
       </div>
       
-      {/* Unified Telemetry Dashboard - Bottom Center (draggable) */}
-      <TelemetryDashboard
+      {/* Unified Compact Telemetry Panel - Bottom */}
+      <UnifiedTelemetryPanel
         performance={{
           fps,
           memoryUsage,
@@ -280,21 +296,8 @@ export default function Error404() {
           currentTelemetryLine,
           simulationSources,
         }}
-        debug={{
-          memoryStats: memoryStatsData ?? undefined,
-          memoryHistory: memoryHistoryData,
-          memoryEvents: memoryEvents.map(e => ({
-            timestamp: e.timestamp,
-            type: e.type,
-            usedMB: e.usedMB,
-          })),
-        }}
+        ecosystemStats={ecosystemStats}
       />
-      
-      {/* Tech Stack Display - Bottom Right */}
-      <div className="fixed bottom-4 right-4 z-50">
-        <TechStackDisplay />
-      </div>
     </div>
   )
 }
